@@ -4,8 +4,8 @@ A Ruby replacement for Arpspoof
 
 ### Install Requirements
 
-```gem install pcaprub
-gem install packetfu```
+```gem install pcaprub```
+```gem install packetfu```
 
 (If errors in Kali, first try: apt-get install ruby-dev)
 
@@ -33,13 +33,13 @@ Options:
 
 *-h* Help
 
-*-q* Prints minimal output to the screen
-
 *-m* Smart ARPing; attempts to monitor ARP requests from the target(s), and only reply as necessary. *May* avoid IDS/ARPwatch etc. This feature is experimental. If not set, ARP packets are sent continuously.
+
+*-q* Prints minimal output to the screen
 
 *-t targets(s)* One or more targets in CIDR notation (nmap style). If omitted, the entire subnet will be targeted. Without [-r], one-way spoofing is performed.
 
-*-r gateway* With [-t] (required), performs two-way spoofing.
+*-r gateway* With [-t] set, performs two-way spoofing.
 
 
 ### Troubleshooting
