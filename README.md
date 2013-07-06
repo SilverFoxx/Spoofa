@@ -4,7 +4,7 @@ A Ruby replacement for Arpspoof
 
 ### Install Requirements
 
-```gem install pcaprub```
+```gem install pcaprub```  
 ```gem install packetfu```
 
 (If errors in Kali, first try: apt-get install ruby-dev)
@@ -23,7 +23,7 @@ Runs a quick script to set the variables. Will offer sane defaults for the vario
 
 #### Command line mode
 
-```ruby spoofa.rb [-hmq] [-t target(s)] [-r gateway] -i interface```
+```ruby spoofa.rb [-hmq] [-t target(s)] [-g gateway] -i interface```
 
 Required:
 
@@ -35,11 +35,11 @@ Options:
 
 *-m* Smart ARPing; attempts to monitor ARP requests from the target(s), and only reply as necessary. *May* avoid IDS/ARPwatch etc. This feature is experimental. If not set, ARP packets are sent continuously.
 
-*-q* Prints minimal output to the screen
+*-v* Run verbosely
 
-*-t targets(s)* One or more targets in CIDR notation (nmap style). If omitted, the entire subnet will be targeted. Without [-r], one-way spoofing is performed.
+*-t targets(s)* One or more targets in CIDR notation (nmap style). If omitted, the entire subnet will be targeted. Without [-g], one-way spoofing is performed.
 
-*-r gateway* With [-t] set, performs two-way spoofing.
+*-g gateway* With [-t] set, performs two-way spoofing.
 
 
 ### Troubleshooting
@@ -55,6 +55,10 @@ Run packetfu's tests:
 Play with packetfu's excellent irb (check is executable first):
 
 ```cd /var/lib/gems/1.9.1/gems/packetfu-1.1.8/examples && irb -r ./packetfu-shell.rb``` 
+
+### Author
+
+VulpiArgenti (SilverFoxx)
 
 ### Licence
 
