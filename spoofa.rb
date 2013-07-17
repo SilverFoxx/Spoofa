@@ -7,19 +7,17 @@
 require 'packetfu'
 require 'optparse'
 require 'ostruct'
-#require 'ipaddr'
 
-#What mode are we running in?
+# What mode are we running in?
 if ARGV.empty?
 	interactive = true
 else # Parse the command-line options
 	options = OpenStruct.new
 	OptionParser.new do |opts|
 		opts.banner = "Usage: spoofa.rb # interactive mode\nUsage: spoofa.rb [-hmv] [-t target(s)] [-g gateway] -i interface # command-line mode"
-	 
 	    opts.separator ""
 	    opts.separator "Specific options:"
-	       
+ 
 		opts.on("-v", "--verbose", "Run verbosely") do |v|
 			options.verbose = v
 		end
@@ -58,6 +56,7 @@ if interactive
 	verbose = true
 	print "Enter target IP: " ###need error checking
 	target = gets.chomp
+	
 	iface = defaults[:iface] 
 	print "Default interface appears to be #{iface}.\nEnter to accept #{iface}, or type an alternative: "
 	temp = gets.chomp
@@ -65,22 +64,34 @@ if interactive
 		iface = temp
 		defaults = PacketFu::Utils.ifconfig(iface) # Iface changed, therefore need new defaults
 	end
-	net = (%x{netstat -nr}).split(/\n/).select {|n| n =~ /UG/ } 
-	gateway = ((net[0]).split)[1] # Guess gateway by parsing netstat
+	
+	net = (%x{netstat -nr}).split(/\n/).select {|n| n =~ /UG/ } # Guess gateway by parsing netstat
+	gateway = ((net[0]).split)[1] 
 	print "Gateway appears to be #{gateway}.\nEnter to accept #{gateway}, or type an alternative IP: "
 	temp = gets.chomp
 	gateway = temp unless temp.empty?
+	
 	print "Are we smart arping? (y/n)"
-	smart = gets.chomp
+	smart = (gets.chomp.upcase == "Y")
 	
 else # CL mode
-	verbose = options.verbose
-	smart = options.smart
-	iface = options.interface
-	target = options.target
-	gateway = options.gateway
+	verbose 	= options.verbose
+	smart 		= options.smart
+	iface 		= options.interface
+	target 		= options.target
+	gateway 	= options.gateway
 	if verbose
-		puts ""
+		if smart
+			var1 = "Smart s"
+		else
+			var1 = "S"
+		end
+		if gateway
+			var2 = "two-way with gateway #{gateway}."
+		else
+			var2 = "one-way."
+		end
+		puts "#{var1}poofing #{target} on #{iface}, #{var2}"
 	end
 end
 
