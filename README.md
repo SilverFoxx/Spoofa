@@ -7,7 +7,7 @@ A Ruby replacement for Arpspoof
 ```gem install pcaprub```  
 ```gem install packetfu```
 
-(If errors in Kali, first try: apt-get install ruby-dev)
+If errors in Kali, first try: ```apt-get install ruby-dev```
 
 Tested on Kali-linux only
 
@@ -23,7 +23,7 @@ Runs a quick script to set the variables. Will offer sane defaults for the vario
 
 #### Command line mode
 
-```ruby spoofa.rb [-hmq] [-t target(s)] [-g gateway] -i interface```
+```ruby spoofa.rb [-hmv] [-t target(s)] [-g gateway] -i interface```
 
 Required:
 
@@ -37,9 +37,9 @@ Options:
 
 *-v* Run verbosely
 
-*-t targets(s)* One or more targets in CIDR notation (nmap style). If omitted, the entire subnet will be targeted. Without [-g], one-way spoofing is performed.
+*-t targets(s)* One or more targets separated by whitespace, and/or a hyphened range. E.g. "-t 192.168.1.10 192.168.1.50-100". If omitted, the entire subnet will be targeted. Without [-g], one-way spoofing is performed, i.e. packets *from* the target are intercepted.
 
-*-g gateway* With [-t] set, performs two-way spoofing.
+*-g gateway* A second target, usually the gateway. With [-t] set, performs two-way spoofing, i.e intercepts packets both to *and* from the target.
 
 
 ### Troubleshooting
