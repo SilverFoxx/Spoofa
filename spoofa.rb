@@ -12,6 +12,11 @@ require 'ostruct'
 if ARGV.empty?
 	interactive = true
 else # Parse the command-line options
+ 	unless ARGV.include?("-i")
+		puts "Interface is required. See spoofa.rb -h.\nTry again"
+		sleep 2 
+		exit 0
+	end
 	options = OpenStruct.new
 	OptionParser.new do |opts|
 		opts.banner = "Usage: spoofa.rb # interactive mode\nUsage: spoofa.rb [-hmv] [-t target(s)] [-g gateway] -i interface # command-line mode"
@@ -22,17 +27,15 @@ else # Parse the command-line options
 			options.verbose = v
 		end
 		
-		opts.on("-m", "--smart", "Smart ARPing; attempts to monitor ARP requests from the target(s), and only reply as necessary. If not set, ARP packets are sent continuously.
-	") do |m|
+		opts.on("-m", "--smart", "Smart ARPing; attempts to monitor ARP requests from the target(s), and only reply as necessary. If not set, ARP packets are sent continuously.") do |m|
 			options.smart = m
 		end
 		
-		opts.on("-t", "--target <target IP>", "One or more targets in CIDR notation (nmap style). If omitted, the entire subnet will be targeted. Without [-r], one-way spoofing is performed.
-	") do |target|
+		opts.on("-t", "--target <target IP>", "One or more targets separated by whitespace, and/or a hyphened range. E.g. \"-t 192.168.1.10 192.168.1.50-100\". If omitted, the entire subnet will be targeted. Without [-g], one-way spoofing is performed, i.e. packets *from* the target are intercepted.") do |target|
 			options.target = target
 		end
 		
-		opts.on("-g", "--gateway <gateway IP>", "With [-t] set, performs two-way spoofing") do |gateway|
+		opts.on("-g", "--gateway <gateway IP>", "With [-t] set, performs two-way spoofing.") do |gateway|
 			options.gateway = gateway
 		end
 		
@@ -40,67 +43,101 @@ else # Parse the command-line options
 			options.interface = interface
 		end
 		
-		opts.on("-h", "--help", "See README.md at https://github.com/SilverFoxx/Spoofa") do |h|
+		opts.on("-h", "--help", "You're looking at it. If it's not good enough, try the README.md at https://github.com/SilverFoxx/Spoofa") do |h|
 			puts opts
 			exit 0
 		end
 	end.parse!
 end
 
-###############
+#------------------------------------------------------#
+# Assorted methods
+
+def ip_check(ip)
+	true if ip =~ /^(192|10|172)((\.)(25[0-5]|2[0-4][0-9]|[1][0-9][0-9]|[1-9][0-9]|[0-9])){3}$/
+end
+
+def puts_verbose(text)
+	puts text if @verbose
+end
+
+#------------------------------------------------------#
 # Let's set some defaults and variables
   
-defaults = PacketFu::Utils.ifconfig
-
 if interactive
-	verbose = true
-	print "Enter target IP: " ###need error checking
+	@verbose = true
+	print "Enter target IP: "
 	target = gets.chomp
 	
-	iface = defaults[:iface] 
-	print "Default interface appears to be #{iface}.\nEnter to accept #{iface}, or type an alternative: "
+	@iface = defaults[:iface] 
+	print "Default interface appears to be #{@iface}.\nEnter to accept #{@iface}, or type an alternative: "
 	temp = gets.chomp
 	unless temp.empty?
-		iface = temp
-		defaults = PacketFu::Utils.ifconfig(iface) # Iface changed, therefore need new defaults
+		@iface = temp
+		defaults = PacketFu::Utils.ifconfig(@iface) # Iface changed, therefore need new defaults
 	end
 	
-	net = (%x{netstat -nr}).split(/\n/).select {|n| n =~ /UG/ } # Guess gateway by parsing netstat
-	gateway = ((net[0]).split)[1] 
-	print "Gateway appears to be #{gateway}.\nEnter to accept #{gateway}, or type an alternative IP: "
-	temp = gets.chomp
-	gateway = temp unless temp.empty?
+	until ip_check(@gateway) do
+		net = (%x{netstat -nr}).split(/\n/).select {|n| n =~ /UG/ } # Guess gateway by parsing netstat
+		@gateway = ((net[0]).split)[1] 
+		if ip_check(@gateway)
+			print "Gateway appears to be #{@gateway}.\nEnter to accept, or type an alternative IP: "
+		else
+			print "Unable to determine gateway. Please enter IP: "
+		end
+		temp = gets.chomp
+		@gateway = temp unless temp.empty?
+		if !ip_check(@gateway)
+			puts "Invalid IP address. Try again..."
+			sleep 1
+		end 
+	end
 	
-	print "Are we smart arping? (y/n)"
-	smart = (gets.chomp.upcase == "Y")
+	smart = false
+	until smart 
+		print "Are we smart arping? (y/n): "
+		smart = gets.chomp.downcase
+		if  smart == "y"
+			@smart
+		elsif smart == "n"
+			@smart = false
+		else
+			smart = false
+			puts "Fat-finger!"
+			sleep 1
+		end
+	end
 	
 else # CL mode
-	verbose 	= options.verbose
-	smart 		= options.smart
-	iface 		= options.interface
-	target 		= options.target
-	gateway 	= options.gateway
-	if verbose
-		if smart
+	if 	options.inspect !~ /interface/
+		puts "Interface is required. See spoofa.rb -h.\nTry again"
+		sleep 2 
+		exit 0
+	end	
+	@verbose 	= options.verbose
+	@smart 		= options.smart
+	@iface 		= options.interface
+	@target 	= options.target
+	@gateway	= options.gateway
+
+	if @verbose
+		if @smart
 			var1 = "Smart s"
 		else
 			var1 = "S"
 		end
-		if gateway
-			var2 = "two-way with gateway #{gateway}."
+		if @gateway
+			var2 = "two-way with gateway #{@gateway}."
 		else
 			var2 = "one-way."
 		end
-		puts "#{var1}poofing #{target} on #{iface}, #{var2}"
+		puts "#{var1}poofing #{@target} on #{@iface}, #{var2}"
 	end
 end
 
-if verbose
-	puts "Obtaining mac addresses...\n"
-end
-	gateway_mac = PacketFu::Utils::arp(gateway) #= :eth_daddr if gateway is router
-	target_mac = PacketFu::Utils::arp(target)
-if verbose
-	puts "Mac of #{gateway} is #{gateway_mac}"
-	puts "Mac of #{target} is #{target_mac}"
-end 
+puts_verbose("\nObtaining mac addresses...\n")
+gateway_mac = PacketFu::Utils::arp(@gateway)
+target_mac = PacketFu::Utils::arp(@target)
+puts_verbose "Mac of #{@gateway} is #{gateway_mac}"
+puts_verbose "Mac of #{@target} is #{target_mac}"
+
