@@ -2,11 +2,12 @@
 
 # SPOOFA - for ARP-spoofing local networks
 
-# (C) 2013 VulpiArgenti (SilverFoxx)
+# (C) 2013 Vulpi Argenti (SilverFoxx)
 
 require 'packetfu'
 require 'optparse'
 require 'ostruct'
+require 'ipaddr'
 
 # What mode are we running in?
 if ARGV.empty?
@@ -31,7 +32,7 @@ else # Parse the command-line options
 			options.smart = m
 		end
 		
-		opts.on("-t", "--target <target IP>", "One or more targets separated by whitespace, and/or a hyphened range. E.g. \"-t 192.168.1.10 192.168.1.50-100\". If omitted, the entire subnet will be targeted. Without [-g], one-way spoofing is performed, i.e. packets *from* the target are intercepted.") do |target|
+		opts.on("-t", "--target <target IP>", "One or more targets separated by comma (no whitespace), and/or a hyphened range. E.g. \"-t 192.168.1.10,192.168.1.50-100\". If omitted, the entire subnet will be targeted. Without [-g], one-way spoofing is performed, i.e. packets *from* the target are intercepted.") do |target|
 			options.target = target
 		end
 		
@@ -52,7 +53,6 @@ end
 
 #------------------------------------------------------#
 # Assorted methods
-
 def ip_check(ip)
 	true if ip =~ /^(192|10|172)((\.)(25[0-5]|2[0-4][0-9]|[1][0-9][0-9]|[1-9][0-9]|[0-9])){3}$/
 end
@@ -61,13 +61,31 @@ def puts_verbose(text)
 	puts text if @verbose
 end
 
+def target_parse(target)
+	target = target.split(",")
+	@target = []
+	@target = target.select {|ip| ip_check(ip)} 	# Move single ips to @target
+	target.delete_if {|ip| ip_check(ip)}			# Leaving range(s) in target
+	target.each do |ip|								# Separate range(s) into start and end addresses
+		from 	= ip[/\A(\w*.){3}(\w*)/]			
+		to 		= ip[/\A(\w*.){3}/] + ip.split("-")[1]	
+		ip_from 	= IPAddr.new(from)
+		ip_to 		= IPAddr.new(to)
+		(ip_from..ip_to).each do |ip|				# Enter each value of range into @target
+			@target << ip.to_s
+		end
+	end
+end
+
 #------------------------------------------------------#
 # Let's set some defaults and variables
-  
+
+defaults = PacketFu::Utils.ifconfig
+
 if interactive
-	@verbose = true
+	@verbose 	= true
 	print "Enter target IP: "
-	target = gets.chomp
+	target 		= gets.chomp
 	
 	@iface = defaults[:iface] 
 	print "Default interface appears to be #{@iface}.\nEnter to accept #{@iface}, or type an alternative: "
@@ -109,15 +127,10 @@ if interactive
 	end
 	
 else # CL mode
-	if 	options.inspect !~ /interface/
-		puts "Interface is required. See spoofa.rb -h.\nTry again"
-		sleep 2 
-		exit 0
-	end	
 	@verbose 	= options.verbose
 	@smart 		= options.smart
 	@iface 		= options.interface
-	@target 	= options.target
+	target 		= options.target
 	@gateway	= options.gateway
 
 	if @verbose
@@ -135,9 +148,11 @@ else # CL mode
 	end
 end
 
-puts_verbose("\nObtaining mac addresses...\n")
+target_parse(target)
+puts_verbose("\nObtaining mac addresses...")
 gateway_mac = PacketFu::Utils::arp(@gateway)
-target_mac = PacketFu::Utils::arp(@target)
-puts_verbose "Mac of #{@gateway} is #{gateway_mac}"
-puts_verbose "Mac of #{@target} is #{target_mac}"
-
+puts_verbose "Mac of #{@gateway} (gateway) is #{gateway_mac}"
+@target.each do |ip|
+	target_mac = PacketFu::Utils::arp(ip)
+	puts_verbose "Mac of #{ip} is #{target_mac}"
+end
