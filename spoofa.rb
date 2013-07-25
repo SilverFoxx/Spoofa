@@ -64,16 +64,14 @@ end
 def target_parse(target)
 	target = target.split(",")
 	@target = []
-	@target = target.select {|ip| ip_check(ip)} 	# Move single ips to @target
-	target.delete_if {|ip| ip_check(ip)}			# Leaving range(s) in target
-	target.each do |ip|								# Separate range(s) into start and end addresses
-		from 	= ip[/\A(\w*.){3}(\w*)/]			
-		to 		= ip[/\A(\w*.){3}/] + ip.split("-")[1]	
+	@target = target.select {|ip| ip_check(ip)} 		# Move single ips to @target
+	target.delete_if {|ip| ip_check(ip)}				# Leaving range(s) in target
+	target.each do |range|								# Separate range(s) into start and end addresses
+		from 	= range[/\A(\w*.){3}(\w*)/]			
+		to 		= range[/\A(\w*.){3}/] + range.split("-")[1]	
 		ip_from 	= IPAddr.new(from)
 		ip_to 		= IPAddr.new(to)
-		(ip_from..ip_to).each do |ip|				# Enter each value of range into @target
-			@target << ip.to_s
-		end
+		(ip_from..ip_to).each { |ip| @target << ip.to_s }	# Enter each value of range into @target 
 	end
 end
 
@@ -96,7 +94,7 @@ if interactive
 	end
 	
 	until ip_check(@gateway) do
-		net = (%x{netstat -nr}).split(/\n/).select {|n| n =~ /UG/ } # Guess gateway by parsing netstat
+		net = (`netstat -nr`).split(/\n/).select {|n| n =~ /UG/ } # Guess gateway by parsing netstat
 		@gateway = ((net[0]).split)[1] 
 		if ip_check(@gateway)
 			print "Gateway appears to be #{@gateway}.\nEnter to accept, or type an alternative IP: "
@@ -144,15 +142,21 @@ else # CL mode
 		else
 			var2 = "one-way."
 		end
-		puts "#{var1}poofing #{@target} on #{@iface}, #{var2}"
+		puts "#{var1}poofing #{target} on #{@iface}, #{var2}"
 	end
 end
 
 target_parse(target)
 puts_verbose("\nObtaining mac addresses...")
+@targets_hash = {}
 gateway_mac = PacketFu::Utils::arp(@gateway)
 puts_verbose "Mac of #{@gateway} (gateway) is #{gateway_mac}"
 @target.each do |ip|
 	target_mac = PacketFu::Utils::arp(ip)
-	puts_verbose "Mac of #{ip} is #{target_mac}"
+	@targets_hash[ip] = target_mac			# Makes hash of target ips => target macs
+	if target_mac
+		puts_verbose "#{ip}: mac is #{target_mac}"
+	else
+		puts_verbose "#{ip}: is down"
+	end
 end
