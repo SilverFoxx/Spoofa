@@ -21,8 +21,8 @@ else # Parse the command-line options
 	options = OpenStruct.new
 	OptionParser.new do |opts|
 		opts.banner = "Usage: spoofa.rb # interactive mode\nUsage: spoofa.rb [-hmv] [-t target(s)] [-g gateway] -i interface # command-line mode"
-	    opts.separator ""
-	    opts.separator "Specific options:"
+		opts.separator ""
+		opts.separator "Specific options:"
  
 		opts.on("-v", "--verbose", "Run verbosely") do |v|
 			options.verbose = v
@@ -50,8 +50,10 @@ else # Parse the command-line options
 		end
 	end.parse!
 end
+
 #------------------------------------------------------#
 # Assorted methods
+
 def ip_check(ip)
 	true if ip =~ /^(192|10|172)((\.)(25[0-5]|2[0-4][0-9]|[1][0-9][0-9]|[1-9][0-9]|[0-9])){3}$/
 end
@@ -62,16 +64,15 @@ end
 
 def target_parse(target)
 	target = target.split(",")
-	@target = []										# Array of target ip's
-	@target = target.select {|ip| ip_check(ip)} 		# Move single ips to @target
-	target.delete_if {|ip| ip_check(ip)}				# Leaving range(s) in target
-	target.each do |range|								# Separate range(s) into start and end addresses
+	@target = []										                    # Array of target ip's
+	@target = target.select {|ip| ip_check(ip)}			    # Move single ips to @target
+	target.delete_if {|ip| ip_check(ip)}				        # Leaving range(s) in target
+	target.each do |range|								              # Separate range(s) into start and end addresses
 		from 	= range[/\A(\w*.){3}(\w*)/]			
 		to 		= range[/\A(\w*.){3}/] + range.split("-")[1]	
 		ip_from 	= IPAddr.new(from)
 		ip_to 		= IPAddr.new(to)
 		(ip_from..ip_to).each { |ip| @target << ip.to_s }	# Enter each value of range into @target 
-		### delete self
 	end
 end
 
@@ -87,7 +88,7 @@ if interactive
 	temp = gets.chomp
 	unless temp.empty?
 		@iface = temp
-		@defaults = PacketFu::Utils.ifconfig(@iface) 				# Iface changed, therefore need new defaults
+		@defaults = PacketFu::Utils.ifconfig(@iface)				# Iface changed, therefore need new defaults
 	end
 	
 	until ip_check(@gateway) do
@@ -138,7 +139,7 @@ if interactive
 	end
 =end
 	
-	print "Enter target IP: " ### sanitise input
+	print "Enter target IP: "
 	target 		= gets.chomp
 	
 # CL mode	
@@ -148,7 +149,7 @@ else
 	@iface 		= options.interface
 	target 		= options.target
 	@gateway	= options.gateway
-	@defaults 	= PacketFu::Utils.ifconfig(@iface)
+	@defaults = PacketFu::Utils.ifconfig(@iface)
 	
 	if @verbose
 =begin
@@ -219,6 +220,7 @@ end
 			arp_pkt_gateway.eth_daddr = arp_pkt_gateway.arp_daddr_mac = gateway_mac
 			arp_pkt_gateway.arp_saddr_ip = target
 		    arp_pkt_gateway.arp_daddr_ip = @gateway
+			
 			@gateway_packets  << arp_pkt_gateway
 		end
 	end
