@@ -33,11 +33,11 @@ Options:
 
 *-h* Help
 
-*-m* Smart ARPing; attempts to monitor ARP requests from the target(s), and only reply as necessary. *May* avoid IDS/ARPwatch etc. This feature is experimental. If not set, ARP packets are sent continuously.
+*-m* Smart ARPing; NOT YET AVAILABLE attempts to monitor ARP requests from the target(s), and only reply as necessary. *May* avoid IDS/ARPwatch etc. This feature is experimental. If not set, ARP packets are sent continuously.
 
 *-v* Run verbosely
 
-*-t targets(s)* One or more targets separated by whitespace, and/or a hyphened range. E.g. "-t 192.168.1.10 192.168.1.50-100". If omitted, the entire subnet will be targeted. Without [-g], one-way spoofing is performed, i.e. packets *from* the target are intercepted.
+*-t targets(s)* One or more targets separated by comma (no whitespace), and/or a hyphened range. E.g. \"-t 192.168.1.10,192.168.1.50-100\". If omitted, the entire subnet will be targeted. Without [-g], one-way spoofing is performed, i.e. packets *from* the target are intercepted."
 
 *-g gateway* A second target, usually the gateway. With [-t] set, performs two-way spoofing, i.e intercepts packets both to *and* from the target.
 
