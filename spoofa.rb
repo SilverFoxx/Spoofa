@@ -193,6 +193,15 @@ end
 #----------------------------------------------------------------------#
 
 puts_verbose("\nObtaining mac addresses...")
+@gateway_mac = PacketFu::Utils::arp(@gateway, :iface => @iface)
+unless @gateway_mac 
+  (0..1).map { @gateway_mac = PacketFu::Utils::arp(@gateway, :iface => @iface) } # Try twice more, then exit.
+  puts "Unable to determine gateway mac."
+  sleep 2
+  exit 0 
+end
+puts_verbose "#{@gateway}: mac is #{@gateway_mac} (Gateway)"
+
 
 # Make hash of target ips => target macs
 @targets_hash = {}
