@@ -76,10 +76,10 @@ def target_parse(target)
   end
 end
   
-def build_pkt(op_code, dest_mac, source_ip, dest_ip)
+def build_pkt(op_code, dest_mac, source_ip, dest_ip, source_mac = @defaults[:eth_saddr])
   @arp_pkt = PacketFu::ARPPacket.new
   @arp_pkt.arp_opcode = op_code
-  @arp_pkt.eth_saddr = @arp_pkt.arp_saddr_mac = @defaults[:eth_saddr]
+  @arp_pkt.eth_saddr = @arp_pkt.arp_saddr_mac = source_mac
   @arp_pkt.eth_daddr = @arp_pkt.arp_daddr_mac = dest_mac
   @arp_pkt.arp_saddr_ip = source_ip
   @arp_pkt.arp_daddr_ip = dest_ip
@@ -107,11 +107,35 @@ def target_scanner(targets, timeout)
     end
   end
   # Join on the child processes to allow them to finish
+  # TODO Writing to hash should avoid need for this
   threads.each do |thread|
       thread.join
   end
   @targets_hash.delete_if { |k, v| v.nil? }
   puts
+end
+
+trap("INT") do 
+  puts "\nRe-ARPing the network..."
+  send_packets = false
+  re_arp_pkts = []
+  build_pkt(2, "ff:ff:ff:ff:ff:ff",  @gateway, "0.0.0.0", @gateway_mac) # Broadcast the correct gateway address###broadcast doesn't stick???
+  re_arp_pkts << @arp_pkt
+  if @two_way
+    @targets_hash.each do |target, target_mac |
+      build_pkt(2, @gateway_mac, target, @gateway, target_mac)
+      re_arp_pkts << @arp_pkt
+    end
+  end
+  10.times do
+    re_arp_pkts.each do |pkt|
+      pkt.to_w(@iface)
+    end
+    sleep 0.5
+  end
+  `echo 0 > /proc/sys/net/ipv4/ip_forward`
+  puts "...done."
+  exit 0
 end
 
 #----------------------------------------------------------------------#
