@@ -76,7 +76,7 @@ def target_parse(target)
   end
 end
   
-def build_pkt(op_code, dest_mac, source_ip, dest_ip, source_mac = @defaults[:eth_saddr])
+def build_pkt(dest_mac, source_ip, dest_ip, source_mac = @defaults[:eth_saddr], op_code = 2)
   @arp_pkt = PacketFu::ARPPacket.new
   @arp_pkt.arp_opcode = op_code
   @arp_pkt.eth_saddr = @arp_pkt.arp_saddr_mac = source_mac
@@ -112,6 +112,7 @@ def target_scanner(targets, timeout)
       thread.join
   end
   @targets_hash.delete_if { |k, v| v.nil? }
+  @targets_hash.delete(@gateway) ###
   puts
 end
 
@@ -119,19 +120,20 @@ trap("INT") do
   puts "\nRe-ARPing the network..."
   send_packets = false
   re_arp_pkts = []
-  build_pkt(2, "ff:ff:ff:ff:ff:ff",  @gateway, "0.0.0.0", @gateway_mac) # Broadcast the correct gateway address###broadcast doesn't stick???
-  re_arp_pkts << @arp_pkt
-  if @two_way
-    @targets_hash.each do |target, target_mac |
-      build_pkt(2, @gateway_mac, target, @gateway, target_mac)
+
+  @targets_hash.each do |target, target_mac|
+    build_pkt(target_mac, @gateway, target, @gateway_mac)
+    re_arp_pkts << @arp_pkt
+    if @two_way
+      build_pkt(@gateway_mac, target, @gateway, target_mac)
       re_arp_pkts << @arp_pkt
     end
   end
-  10.times do
+  5.times do
     re_arp_pkts.each do |pkt|
       pkt.to_w(@iface)
     end
-    sleep 0.5
+    sleep 1
   end
   `echo 0 > /proc/sys/net/ipv4/ip_forward`
   puts "...done."
@@ -208,6 +210,7 @@ else
   end
 end
 broadcast = true if target.nil?
+target = "#{(@defaults[:ip4_obj]).to_s}-255" if broadcast # Network ip, range 0-255
  
 var1 = "S"
 if @two_way
@@ -237,31 +240,19 @@ puts_verbose "#{@gateway}: mac is #{@gateway_mac} (Gateway)"
 @targets_hash = {}
 @target_packets  = []
 @gateway_packets = []
-if broadcast
-  puts_verbose "Using broadcast address for targets"
-  build_pkt(2, "ff:ff:ff:ff:ff:ff",  @gateway, "0.0.0.0")
-  @target_packets << @arp_pkt
-  if @two_way
-    target_parse("#{(@defaults[:ip4_obj]).to_s}-255") # Make hash of network ip's, range 0-255
-    target_scanner(@target, 1.5)
-    @targets_hash.delete(@gateway)
-  end
-else  
-  target_parse(target)
-  target_scanner(@target, 2)
-end ### need to tell self real gateway?
+target_parse(target)
+target_scanner(@target, 2)
+ ### need to tell self real gateway?
 
 # Make arrays of packets for targets and gateway
-# Args for build_pkt are: op_code, dest_mac, source_ip, dest_ip
-unless broadcast  # Have already made target packets (broadcast)
+# Args for build_pkt are: dest_mac, source_ip, dest_ip, op_code
   @targets_hash.each do |target, target_mac|
-    build_pkt(2, target_mac, @gateway, target)
+    build_pkt(target_mac, @gateway, target)
     @target_packets << @arp_pkt
   end
-end
 if @two_way
   @targets_hash.each do |target, |
-    build_pkt(2, @gateway_mac, target, @gateway)
+    build_pkt(@gateway_mac, target, @gateway)
     @gateway_packets << @arp_pkt
   end
 end
