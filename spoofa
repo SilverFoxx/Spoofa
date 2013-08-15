@@ -134,7 +134,7 @@ def target_scanner(targets, timeout)
         end
         GC.start
       end
-      sleep 0.1 # Absolutely crucial
+      sleep 0.05 # Absolutely crucial
     end
     threads.each { |thread| thread.join }          # Wait for all the child processes to finish
   else
@@ -187,7 +187,7 @@ if interactive
 
   @defaults = PacketFu::Utils.ifconfig(Pcap.lookupdev)
   @iface = @defaults[:iface] 
-  print "Default interface appears to be #{@iface}.\nEnter to accept, or type an alternative: "
+  print "\nDefault interface appears to be #{@iface}.\nEnter to accept, or type an alternative: "
   temp = gets.chomp
   unless temp.empty?
     @iface = temp
@@ -224,8 +224,23 @@ if interactive
       sleep 1
     end
   end
-
-  print "Enter target IP(s), separated by comma, or as a range: "
+  
+  var = false
+  until var 
+    print "Use multi-threading to scan the subnet? (y/n): "
+    var = gets.chomp.downcase
+    if  var == "y"
+      @parallel = true
+    elsif var == "n"
+      @parallel = false
+    else
+      var = false
+      puts "Must enter \"y\" or \"n\"."
+      sleep 1
+    end
+  end
+  
+  print "Enter target IP(s), separated by comma, or as a range. Enter blank to target entire subnet: "
   target = gets.chomp
 
 # CL mode 
@@ -249,9 +264,9 @@ else
     exit 0
   end
 end
-broadcast = true if target.nil?
+broadcast = true if target.nil? || target == ""
 target = "#{(@defaults[:ip4_obj]).to_s}-255" if broadcast # Network ip, range 0-255
- 
+
 var1 = "S"
 if @two_way
   var2 = "two-way with gateway #{@gateway}."
