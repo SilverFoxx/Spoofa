@@ -167,32 +167,32 @@ def make_packet_array(target_hash)
     build_pkt(target_mac, @gateway, target)
     @target_packets << @arp_pkt
     @mutex.synchronize do
-      target_hash.delete(target) if target_hash == @new_targets # delete target once packets made
+      @targets_hash.merge!(target_hash) # add new targets to @targets_hash, preventing duplicate new targets
     end
   end
 end
 
 # continuously monitors network for new ARPs, then adds them to @new_targets.
 def arp_monitor
-
-  @new_targets = {}
   arp_thread = Thread.new do
     @arp_cap = PacketFu::Capture.new(:iface => @defaults[:iface], :filter => "arp and not ether src #{@defaults[:eth_saddr]}")
     @arp_cap.stream.each do |p|
+      @new_targets = {}   # start each loop empty
       arp_pkt = PacketFu::Packet.parse p
       ipaddr = arp_pkt.arp_saddr_ip
       if in_scope?(ipaddr) && ipaddr != @defaults[:ip_saddr] && !@targets_hash.include?(ipaddr)
         if arp_pkt.arp_opcode == 1
-          #@mutex.synchronize do
-            @new_targets[ipaddr] = PacketFu::Utils::arp(ipaddr, :timeout => 3, :iface => @iface)
-            sleep 5
-          #end
-          puts_verbose("\nNew target arrived; #{ipaddr} 1\n")
+            macaddr = PacketFu::Utils::arp(ipaddr, :timeout => 3, :iface => @iface)
+            2.times do
+                macaddr = PacketFu::Utils::arp(ipaddr, :timeout => 5, :iface => @iface) unless macaddr
+            end
+            @new_targets[ipaddr] = macaddr
+          puts_verbose("\nNew target arrived; #{ipaddr} ")
         elsif arp_pkt.arp_opcode == 2
           @new_targets[ipaddr] = arp_pkt.arp_saddr_mac
-          puts_verbose("\nNew target arrived; #{ipaddr} 2\n")
+          puts_verbose("\nNew target arrived; #{ipaddr} ")
         end
-          make_packet_array(@new_targets) # makes additional spoof packets for any new targets # unless @new_targets.nil?
+          make_packet_array(@new_targets) unless @new_targets.empty? # makes additional spoof packets for any new targets
       end
     end
   end
@@ -347,7 +347,6 @@ target_parse(target)
 target_scanner(@target, 3)
 make_packet_array(@targets_hash)
 arp_monitor
-
 
 `echo 1 > /proc/sys/net/ipv4/ip_forward`
 @send_packets = true
