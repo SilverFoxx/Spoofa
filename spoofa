@@ -135,7 +135,7 @@ def target_scanner(targets, timeout)
         end
         GC.start
       end
-      sleep 0.05 # Absolutely crucial
+      sleep 0.07 # Absolutely crucial
     end
     threads.each { |thread| thread.join }          # Wait for all the child processes to finish
   else
@@ -180,19 +180,19 @@ def arp_monitor
       @new_targets = {}   # start each loop empty
       arp_pkt = PacketFu::Packet.parse p
       ipaddr = arp_pkt.arp_saddr_ip
-      if in_scope?(ipaddr) && ipaddr != @defaults[:ip_saddr] && !@targets_hash.include?(ipaddr)
+      if in_scope?(ipaddr) && ipaddr != @defaults[:ip_saddr] && !@targets_hash.include?(ipaddr) && ipaddr != @gateway
         if arp_pkt.arp_opcode == 1
-            macaddr = PacketFu::Utils::arp(ipaddr, :timeout => 3, :iface => @iface)
-            2.times do
-                macaddr = PacketFu::Utils::arp(ipaddr, :timeout => 5, :iface => @iface) unless macaddr
-            end
-            @new_targets[ipaddr] = macaddr
+          macaddr = PacketFu::Utils::arp(ipaddr, :timeout => 3, :iface => @iface)
+          2.times do
+            macaddr = PacketFu::Utils::arp(ipaddr, :timeout => 5, :iface => @iface) unless macaddr
+          end
+          @new_targets[ipaddr] = macaddr
           puts_verbose("\nNew target arrived; #{ipaddr} ")
         elsif arp_pkt.arp_opcode == 2
           @new_targets[ipaddr] = arp_pkt.arp_saddr_mac
           puts_verbose("\nNew target arrived; #{ipaddr} ")
         end
-          make_packet_array(@new_targets) unless @new_targets.empty? # makes additional spoof packets for any new targets
+        make_packet_array(@new_targets) unless @new_targets.empty? # makes additional spoof packets for any new targets
       end
     end
   end
@@ -344,7 +344,7 @@ end
 puts_verbose "#{@gateway} \tmac is #{@gateway_mac} (Gateway)"
 
 target_parse(target)
-target_scanner(@target, 3)
+target_scanner(@target, 4)
 make_packet_array(@targets_hash)
 arp_monitor
 
