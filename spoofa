@@ -33,14 +33,10 @@ else
   begin
     options = OpenStruct.new
     optparse = OptionParser.new do |opts|
-      opts.banner = "Interactive mode:\tspoofa\nCommand-line mode:\tspoofa [-hmpv] [-t target(s)] [-g gateway] -i interface"
+      opts.banner = "Interactive mode:\tspoofa\nCommand-line mode:\tspoofa [-hpv] [-t target(s)] [-g gateway] -i interface"
       opts.separator ""
       opts.separator "Specific options:"
   
-      opts.on("-m", "--smart", "[NOT WORKING YET] Smart ARPing; attempts various tricks to avoid IDS. If not set, ARP packets are sent continuously.") do |m|
-        options.smart = m
-      end
-      
       opts.on("-p", "--parallel", "Uses parallel/multi-threaded scanning. Very slow without it; but possibly unstable on some systems. Best run with \"-v\".") do |p|
         options.parallel = p
       end
@@ -174,7 +170,7 @@ end
 
 # continuously monitors network for new ARPs, then adds them to @new_targets.
 def arp_monitor
-  arp_thread = Thread.new do
+  Thread.new do
     @arp_cap = PacketFu::Capture.new(:iface => @defaults[:iface], :filter => "arp and not ether src #{@defaults[:eth_saddr]}")
     @arp_cap.stream.each do |p|
       @new_targets = {}   # start each loop empty
@@ -317,7 +313,6 @@ end
 broadcast = true if target.nil? || target == ""
 target = "#{(@defaults[:ip4_obj]).to_s}-255" if broadcast # Network ip, range 0-255
 
-var1 = "S"
 if @two_way
   var2 = "two-way with gateway #{@gateway}."
 else
@@ -328,7 +323,7 @@ if broadcast
 else
   var3 = target
 end 
-puts "\n#{var1}poofing #{var3} on #{@iface}, #{var2}"
+puts "\n#{Spoofing #{var3} on #{@iface}, #{var2}"
 
 #----------------------------------------------------------------------#
 # Run the script
