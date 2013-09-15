@@ -126,7 +126,7 @@ def target_scanner(targets, timeout)
       sleep 0.07 # Absolutely crucial
     end
     threads.each { |thread| thread.join }          # Wait for all the child processes to finish
-  else #TODO: How to DRY out?
+  else # TODO: How to DRY out?
     targets.each do |ip|
       @targets_hash[ip] = PacketFu::Utils::arp(ip, :timeout => timeout, :iface => @iface)
       if @targets_hash[ip]
@@ -168,17 +168,18 @@ def arp_monitor
       ipaddr = arp_pkt.arp_saddr_ip
       if in_scope?(ipaddr) && ipaddr != @defaults[:ip_saddr] && !@targets_hash.include?(ipaddr) && ipaddr != @gateway
         if arp_pkt.arp_opcode == 1
-          timeout = 2
-          3.times do
-            macaddr = PacketFu::Utils::arp(ipaddr, :timeout => timeout, :iface => @iface) unless macaddr
-            timeout += 2
+          macaddr = PacketFu::Utils::arp(ipaddr, :timeout => 6, :iface => @iface)
+          5.times do
+            sleep 1 unless macaddr # FIXME: a better way of waiting
           end
           @new_targets[ipaddr] = macaddr
         elsif arp_pkt.arp_opcode == 2
-          @new_targets[ipaddr] = arp_pkt.arp_saddr_mac
+          @new_targets[ipaddr] = arp_pkt.arp_saddr_mac = macaddr
         end
-        puts_verbose("\nNew target arrived; #{ipaddr} ")
-        make_packet_array(@new_targets) unless @new_targets.empty? # makes additional spoof packets for any new targets
+        if macaddr
+          puts_verbose("\nNew target arrived; #{ipaddr} ")
+          make_packet_array(@new_targets)  # makes additional spoof packets for any new targets
+        end
       end
     end
   end
@@ -201,7 +202,7 @@ def neat_exit
         re_arp_pkts << @arp_pkt
       end
     end
-    3.times do
+    2.times do
       re_arp_pkts.each { |pkt| pkt.to_w(@iface) }
       sleep 1
     end
@@ -328,16 +329,15 @@ puts "\nSpoofing #{var3} on #{@iface}, #{var2}"
 # Run the script
 
 puts_verbose("\nLooking for gateway...")
-3.times do
-  timeout = 3
-  @gateway_mac = PacketFu::Utils::arp(@gateway, :timeout => timeout, :iface => @iface) unless @gateway_mac
-  timeout += 2
+@gateway_mac = PacketFu::Utils::arp(@gateway, :timeout => 6, :iface => @iface)
+6.times do
+ sleep 1 unless @gateway_mac # FIXME: a better way of waiting for gateway response
 end
 if @gateway_mac
   puts_verbose "#{@gateway} \tmac is #{@gateway_mac} (Gateway)"
 else
   puts "Unable to determine gateway mac."
-  sleep 2
+  sleep 1
   neat_exit
 end
 
