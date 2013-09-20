@@ -23,51 +23,6 @@ require 'optparse'
 require 'ostruct'
 require 'ipaddr'
 
-# What mode are we running in?
-if ARGV.empty?
-  interactive = true
-else 
-  begin
-    options = OpenStruct.new
-    optparse = OptionParser.new do |opts|
-      opts.banner = "Interactive mode:\tspoofa\nCommand-line mode:\tspoofa [-hpv] [-t target(s)] [-g gateway] -i interface"
-      opts.separator ""
-      opts.separator "Specific options:"
-  
-      opts.on("-p", "--parallel", "Uses parallel/multi-threaded scanning. Very slow without it; but possibly unstable on some systems. Best run with \"-v\".") do |p|
-        options.parallel = p
-      end
-      
-      opts.on("-v", "--verbose", "Run verbosely") do |v|
-        options.verbose = v
-      end            
-  
-      opts.on("-t", "--target <target IP>", "One or more targets separated by comma (no whitespace), and/or hyphened ranges). E.g. \"-t 192.168.1.10,192.168.1.50-100\". If omitted, all live targets in the entire subnet will be spoofed. Without [-g], one-way spoofing is performed, i.e. packets *from* the target are intercepted.") do |target|
-        options.target = target
-      end
-  
-      opts.on("-g", "--gateway <gateway IP>", "Performs two-way spoofing.") do |gateway|
-        options.gateway = gateway
-      end
-  
-      opts.on("-i", "--interface <interface>", "Interface") do |interface|
-        options.interface = interface
-      end
-  
-      opts.on("-h", "--help", "You're looking at it. If it's not good enough, try the README.md at https://github.com/SilverFoxx/Spoofa") do |h|
-        puts opts
-        exit 0
-      end
-    end
-    optparse.parse! 
-    raise OptionParser::MissingArgument if options.interface.nil? 
-  rescue OptionParser::MissingArgument => e
-    puts "\n!!! Interface required !!!\n\n" if e.message =~ /argument/
-    puts optparse
-    exit 0
-  end
-end
-
 #------------------------------------------------------------------------------#
 # Assorted methods
 
@@ -77,6 +32,10 @@ end
 
 def puts_verbose(text)
   puts text if @verbose
+end
+
+def print_verbose(text)
+  print text if @verbose
 end
 
 def target_parse(target)
@@ -104,9 +63,9 @@ def build_pkt(dest_mac, source_ip, dest_ip, source_mac = @defaults[:eth_saddr], 
   @arp_pkt.arp_daddr_ip = dest_ip
 end 
 
-# Broadcast packets don't reliably work, best to directly target live hosts
+# Broadcast packets don't reliably work. Best to scan for, and directly target, live hosts
 def target_scanner(targets, timeout)
-  print "\nLooking for live targets..." if @verbose
+  print_verbose "\nLooking for live targets..."
   @targets_hash = {}
   if @parallel
     threads = []                                  # To keep track of the child processes/threads
@@ -116,9 +75,9 @@ def target_scanner(targets, timeout)
         @targets_hash[ip] = PacketFu::Utils::arp(ip, :timeout => timeout, :iface => @iface)
         @mutex.synchronize do                     # Mutex prevents multiple threads writing to the screen at the same time
           if @targets_hash[ip]
-            print "\n#{ip} \tmac is #{@targets_hash[ip]} " if @verbose
-          elsif @verbose
-            print "."
+            print_verbose "\n#{ip} \tmac is #{@targets_hash[ip]} "
+          else
+            print_verbose "."
           end
         end
         GC.start
@@ -130,9 +89,9 @@ def target_scanner(targets, timeout)
     targets.each do |ip|
       @targets_hash[ip] = PacketFu::Utils::arp(ip, :timeout => timeout, :iface => @iface)
       if @targets_hash[ip]
-        print "\n#{ip} \tmac is #{@targets_hash[ip]} " if @verbose
-      elsif @verbose
-        print "."
+        print_verbose "\n#{ip} \tmac is #{@targets_hash[ip]} "
+      else
+        print_verbose "."
       end
       GC.start
     end
@@ -214,6 +173,52 @@ def neat_exit
 end
 
 trap("INT") { neat_exit }
+
+#------------------------------------------------------------------------------#
+# What mode are we running in?
+if ARGV.empty?
+  interactive = true
+else 
+  begin
+    options = OpenStruct.new
+    optparse = OptionParser.new do |opts|
+      opts.banner = "Interactive mode:\tspoofa\nCommand-line mode:\tspoofa [-hpv] [-t target(s)] [-g gateway] -i interface"
+      opts.separator ""
+      opts.separator "Specific options:"
+  
+      opts.on("-p", "--parallel", "Uses parallel/multi-threaded scanning. Very slow without it; but possibly unstable on some systems. Best run with \"-v\".") do |p|
+        options.parallel = p
+      end
+      
+      opts.on("-v", "--verbose", "Run verbosely") do |v|
+        options.verbose = v
+      end            
+  
+      opts.on("-t", "--target <target IP>", "One or more targets separated by comma (no whitespace), and/or hyphened ranges). E.g. \"-t 192.168.1.10,192.168.1.50-100\". If omitted, all live targets in the entire subnet will be spoofed. Without [-g], one-way spoofing is performed, i.e. packets *from* the target are intercepted.") do |target|
+        options.target = target
+      end
+  
+      opts.on("-g", "--gateway <gateway IP>", "Performs two-way spoofing.") do |gateway|
+        options.gateway = gateway
+      end
+  
+      opts.on("-i", "--interface <interface>", "Interface") do |interface|
+        options.interface = interface
+      end
+  
+      opts.on("-h", "--help", "You're looking at it. If it's not good enough, try the README.md at https://github.com/SilverFoxx/Spoofa") do |h|
+        puts opts
+        exit 0
+      end
+    end
+    optparse.parse! 
+    raise OptionParser::MissingArgument if options.interface.nil? 
+  rescue OptionParser::MissingArgument => e
+    puts "\n!!! Interface required !!!\n\n" if e.message =~ /argument/
+    puts optparse
+    exit 0
+  end
+end
 
 #------------------------------------------------------------------------------#
 # Let's set some defaults and variables
@@ -352,7 +357,7 @@ while @send_packets
   puts "\n\nSending spoofing packets to"
   @targets_hash.each { |ip, _| print "; #{ip}" }
   print " and gateway #{@gateway}" if @two_way
-  print "\nPackets sent: " if @verbose
+  print_verbose "\nPackets sent: "
   count = 0
   while true
     @target_packets.each do |pkt|
@@ -366,7 +371,7 @@ while @send_packets
       end
     end
     GC.start   # to deal with "memory leak" (more likely a problem in calling the GC)
-    print "#{count}, " if @verbose
+    print_verbose "#{count}, "
     sleep 4
   end
 end
